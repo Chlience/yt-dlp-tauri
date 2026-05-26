@@ -50,7 +50,7 @@ type ToolInstallProgress = {
 
 const translations = {
   en: {
-    "app.title": "yt-dlp-windows",
+    "app.title": "yt-dlp-tauri",
     "app.eyebrow": "Desktop downloader",
     "app.heading": "Paste, choose, download.",
     "app.subtitle": "Tools, folder, and logs live in settings.",
@@ -134,7 +134,7 @@ const translations = {
     "event.cancelRequested": "Cancel requested.",
   },
   zh: {
-    "app.title": "yt-dlp-windows",
+    "app.title": "yt-dlp-tauri",
     "app.eyebrow": "桌面下载器",
     "app.heading": "粘贴，选择，下载。",
     "app.subtitle": "工具链、目录和日志放在设置里。",
@@ -285,7 +285,7 @@ function must<T extends Element>(selector: string): T {
 }
 
 function resolveInitialLanguage(): Language {
-  const stored = localStorage.getItem("yt-dlp-windows-language");
+  const stored = localStorage.getItem("yt-dlp-tauri-language");
   if (stored === "en" || stored === "zh") {
     return stored;
   }
@@ -341,7 +341,7 @@ function applyTranslations() {
 
 function setLanguage(language: Language) {
   state.language = language;
-  localStorage.setItem("yt-dlp-windows-language", language);
+  localStorage.setItem("yt-dlp-tauri-language", language);
   applyTranslations();
   if (!state.metadata) {
     renderEmptyPreview(t("preview.emptyStart"));

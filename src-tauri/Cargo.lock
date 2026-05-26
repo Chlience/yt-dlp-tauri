@@ -5051,7 +5051,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "yt-dlp-windows-tauri"
+name = "yt-dlp-tauri"
 version = "0.1.0"
 dependencies = [
  "serde",

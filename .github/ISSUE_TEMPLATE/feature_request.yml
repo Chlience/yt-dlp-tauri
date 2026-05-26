@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a focused improvement for yt-dlp-tauri.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the change you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional, list simpler or different approaches.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Download workflow
+        - Toolchain installation
+        - UI or i18n
+        - Packaging
+        - Documentation
+        - Other
+    validations:
+      required: true

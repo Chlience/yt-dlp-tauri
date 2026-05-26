@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This app can install third-party command-line tools under the app data tool cache, and development checkouts can pre-restore them under `src-tauri/Tools/win-x64`. Those tools keep their own licenses and redistribution obligations.
+`yt-dlp-tauri` can install third-party command-line tools under the app data tool cache, and development checkouts can pre-restore them under `src-tauri/Tools/win-x64`. Tool binaries are not committed to this repository. Those tools keep their own licenses and redistribution obligations.
 
 ## yt-dlp
 

@@ -1,22 +1,28 @@
-# yt-dlp-windows Tauri
+# yt-dlp-tauri
 
-`yt-dlp-windows` 的 Tauri 2 重构版：在 Windows 上粘贴视频链接，预览信息，选择清晰度，然后下载 MP4 友好的文件。
+一个基于 Tauri 2 的轻量桌面下载器，底层使用 `yt-dlp`。粘贴链接、预览信息、选择清晰度，然后下载 MP4 友好的文件，不需要手写命令行。
 
 [English](./README.md)
 
-## 当前状态
+## 功能
 
-这个文件夹是放在 `~/yt-dlp-windows-tauri` 下的独立 Tauri 重写版本。它保留原应用的核心流程，但把 WinUI/.NET 外壳替换为 Rust + TypeScript 桌面应用。
-
-已实现：
-
-- 通过内嵌 `yt-dlp` 解析视频信息。
+- 通过 `yt-dlp` 解析视频信息。
 - 展示标题、封面、来源 URL、时长、描述和清晰度选项。
 - 下载时显示实时进度、速度、ETA，并支持取消。
-- 选择、保存、恢复和打开输出目录。
-- 检测内嵌 `yt-dlp`、FFmpeg / ffprobe 和 Deno 状态。
+- 选择、保存、重置和打开输出目录。
 - 在应用内安装或修复当前 target 的工具链。
+- 按固定 manifest 的 SHA-256 校验工具。
+- 支持中英文界面切换。
 - 写入本地运行日志。
+
+## 状态
+
+这个项目已经整理到适合公开源码仓库的状态，但发布打包路径仍然保持克制：
+
+- 当前已填充的工具 target：`win-x64`。
+- 计划中的 manifest target：`win-arm64`，等所有工具 URL 和 hash 都固定后再补齐。
+- 打包目标：NSIS installer。
+- 仓库不提交工具二进制。应用会把工具安装到 app data 工具缓存中，开发 checkout 也可以通过 `scripts/download-tools.ps1` 还原工具。
 
 ## 技术栈
 
@@ -25,13 +31,12 @@
 | 桌面运行时 | Tauri 2 |
 | 后端 | Rust |
 | 前端 | Vanilla TypeScript + Vite |
-| UI 风格 | 使用 `$impeccable` 控制的产品 UI：克制界面、紧凑工作流、稳定控件 |
+| UI | 产品型桌面界面 |
 | 工具链 | 应用管理的 Windows `yt-dlp.exe`、`ffmpeg.exe`、`ffprobe.exe`、`deno.exe` |
-| 打包目标 | NSIS installer |
 
 ## 从源码构建
 
-真实应用构建请在 Windows 上执行。应用首次运行时可以自动安装工具链，`scripts/download-tools.ps1` 则保留给开发或离线打包使用。
+真实应用构建请在 Windows 上执行。WSL 可以跑很多检查，但发布安装包应在 Windows + Rust MSVC toolchain 环境中构建。
 
 依赖：
 
@@ -53,7 +58,7 @@ npm install
 .\scripts\download-tools.ps1
 ```
 
-普通使用不需要先执行这个脚本。如果应用检测到工具缺失，在 Toolchain 面板点击 `Install tools` 即可。
+普通使用不需要先执行这个脚本。如果应用检测到工具缺失，打开应用，进入 Settings，点击 `Install tools` 即可。
 
 开发运行：
 
@@ -77,27 +82,31 @@ npm run tauri build
 npm run build
 ```
 
+Rust 后端测试：
+
+```powershell
+cargo test --manifest-path .\src-tauri\Cargo.toml --lib
+```
+
 Rust 后端检查：
 
 ```powershell
 cargo check --manifest-path .\src-tauri\Cargo.toml
 ```
 
-WSL 可以跑这些检查。真实 Windows 发布包请在 Windows + Rust MSVC toolchain 环境中构建。
-
 ## 运行时数据
 
 视频默认下载到：
 
 ```text
-%USERPROFILE%\Downloads\yt-dlp-windows\
+%USERPROFILE%\Downloads\yt-dlp-tauri\
 ```
 
 应用状态和日志位于：
 
 ```text
-%LOCALAPPDATA%\yt-dlp-windows-tauri\state\
-%LOCALAPPDATA%\yt-dlp-windows-tauri\logs\app.log
+%LOCALAPPDATA%\yt-dlp-tauri\state\
+%LOCALAPPDATA%\yt-dlp-tauri\logs\app.log
 ```
 
 开发 checkout 工具可以位于：
@@ -109,10 +118,10 @@ src-tauri\Tools\win-x64\ffmpeg\bin\ffprobe.exe
 src-tauri\Tools\win-x64\deno\deno.exe
 ```
 
-安装后的应用会把工具写入应用数据目录，例如：
+安装后的应用会把工具写入 app data 目录：
 
 ```text
-%LOCALAPPDATA%\yt-dlp-windows-tauri\Tools\win-x64\
+%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\
 ```
 
 工具版本、来源 URL、target 名称和 SHA-256 哈希记录在 [`src-tauri/tools-manifest.json`](./src-tauri/tools-manifest.json)。
@@ -121,17 +130,26 @@ src-tauri\Tools\win-x64\deno\deno.exe
 
 ```text
 index.html                    应用界面结构
-src/main.ts                   Tauri 命令调用和 UI 状态
-src/styles.css                产品 UI 样式
+src/main.ts                   Tauri 命令调用、i18n 和 UI 状态
+src/styles.css                桌面 UI 样式
 src-tauri/src/lib.rs          Rust 后端命令和 yt-dlp 进程控制
 src-tauri/tauri.conf.json     Tauri 应用与打包配置
 scripts/download-tools.ps1    可选的开发工具链还原脚本
+THIRD-PARTY-NOTICES.md        第三方工具来源和再分发说明
 ```
 
-## 工具更新说明
+## 发布前检查
 
-应用会从 `src-tauri/tools-manifest.json` 安装当前 target，并对每个解压出的可执行文件做 SHA-256 校验。现在已填充 `win-x64`；manifest 结构已为 `win-arm64` 预留，等所有工具 URL 和 hash 固定后即可补齐。
+发布 release 前：
 
-## 许可证
+1. 运行上面的验证命令。
+2. 在 Windows 上构建 NSIS 安装包。
+3. 确认 `src-tauri/tools-manifest.json` 使用固定 release URL，不使用 `latest`。
+4. 确认生成目录和还原出来的工具没有被 staged。
+5. 随 release 保留 GPL 许可证和第三方声明。
 
-分发时需要保留原项目的 GPL 义务，因为内嵌的 yt-dlp 可执行文件和 FFmpeg GPL 构建会影响再分发。详见 [`THIRD-PARTY-NOTICES.md`](./THIRD-PARTY-NOTICES.md)。
+## 法律说明
+
+本项目使用 GPL-3.0 许可证。应用会下载并使用第三方命令行工具，这些工具有各自的许可证和再分发义务。详见 [`THIRD-PARTY-NOTICES.md`](./THIRD-PARTY-NOTICES.md)。
+
+本项目不隶属于 `yt-dlp`、FFmpeg、Deno 或 Tauri。

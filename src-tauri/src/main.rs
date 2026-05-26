@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    yt_dlp_windows_tauri_lib::run()
+    yt_dlp_tauri_lib::run()
 }

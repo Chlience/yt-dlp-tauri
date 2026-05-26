@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "yt-dlp-windows",
+  "productName": "yt-dlp-tauri",
   "version": "0.1.0",
-  "identifier": "com.chlience.ytdlpwindows",
+  "identifier": "com.chlience.ytdlptauri",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "yt-dlp-windows",
+        "title": "yt-dlp-tauri",
         "width": 1180,
         "height": 820,
         "minWidth": 980,

@@ -1,8 +1,24 @@
 {
-  "name": "yt-dlp-windows-tauri",
+  "name": "yt-dlp-tauri",
   "private": true,
   "version": "0.1.0",
-  "description": "A Tauri rebuild of yt-dlp-windows.",
+  "description": "A minimal Tauri desktop downloader powered by yt-dlp.",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chlience/yt-dlp-tauri.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Chlience/yt-dlp-tauri/issues"
+  },
+  "homepage": "https://github.com/Chlience/yt-dlp-tauri#readme",
+  "keywords": [
+    "yt-dlp",
+    "tauri",
+    "desktop",
+    "video-downloader",
+    "windows"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",
