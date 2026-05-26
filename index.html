@@ -100,6 +100,16 @@
         </div>
       </section>
 
+      <section class="settings-section github-site-section" aria-labelledby="github-site-heading">
+        <div class="github-access-row">
+          <h3 id="github-site-heading" data-i18n="settings.githubSite">GitHub site</h3>
+          <div class="github-access-toggle" role="group" data-i18n-aria-label="github.accessLabel" aria-label="GitHub access mode">
+            <button id="github-direct" class="segment" type="button" data-github-access="direct" data-i18n="github.direct">Direct</button>
+            <button id="github-proxy" class="segment" type="button" data-github-access="gh-proxy" data-i18n="github.proxy">gh-proxy</button>
+          </div>
+        </div>
+      </section>
+
       <section class="settings-section" aria-labelledby="tools-heading">
         <div class="settings-section-header">
           <h3 id="tools-heading" data-i18n="settings.toolchain">Toolchain</h3>
@@ -123,17 +133,19 @@
       </section>
 
       <footer class="settings-footer">
-        <div class="settings-meta">
-          <span>
-            <span data-i18n="settings.version">Version</span>
-            <span id="app-version">0.1.0</span>
-          </span>
-          <span id="update-status" class="update-status" aria-live="polite"></span>
-        </div>
-        <div class="settings-footer-actions">
-          <button id="check-updates" class="button secondary" type="button" data-i18n="action.checkUpdates">Check updates</button>
-          <button id="release-link" class="button secondary" type="button" hidden data-i18n="action.openRelease">Open release</button>
-          <button id="github-link" class="button secondary" type="button" data-i18n="action.github">GitHub</button>
+        <div class="settings-footer-main">
+          <div class="settings-meta">
+            <span>
+              <span data-i18n="settings.version">Version</span>
+              <span id="app-version">0.1.0</span>
+            </span>
+            <span id="update-status" class="update-status" aria-live="polite"></span>
+          </div>
+          <div class="settings-footer-actions">
+            <button id="check-updates" class="button secondary" type="button" data-i18n="action.checkUpdates">Check updates</button>
+            <button id="release-link" class="button secondary" type="button" hidden data-i18n="action.openRelease">Open release</button>
+            <button id="github-link" class="button secondary" type="button" data-i18n="action.projectHome">Project home</button>
+          </div>
         </div>
       </footer>
     </aside>

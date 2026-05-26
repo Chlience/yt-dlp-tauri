@@ -468,12 +468,19 @@ progress::-webkit-progress-value {
   display: grid;
   grid-template-columns: 1fr;
   align-items: start;
-  gap: 9px;
+  gap: 8px;
   border-top: 1px solid var(--stroke);
   background: color-mix(in oklch, var(--surface), transparent 2%);
-  padding: 12px 20px 14px;
+  padding: 11px 20px 13px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.settings-footer-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
 }
 
 .settings-meta {
@@ -507,7 +514,7 @@ progress::-webkit-progress-value {
 .settings-footer-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -515,6 +522,37 @@ progress::-webkit-progress-value {
   min-height: 34px;
   padding: 0 12px;
   font-size: 0.84rem;
+}
+
+.github-site-section {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.github-access-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+}
+
+.github-access-row h3 {
+  min-width: 0;
+}
+
+.github-access-toggle {
+  display: inline-flex;
+  min-height: 32px;
+  padding: 3px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--surface), var(--page) 40%);
+}
+
+.github-access-toggle .segment {
+  min-width: 68px;
+  font-size: 0.8rem;
 }
 
 .split-actions,
@@ -649,9 +687,26 @@ progress::-webkit-progress-value {
     grid-template-columns: 1fr;
   }
 
+  .settings-footer-main,
+  .github-access-row {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-footer-main {
+    display: grid;
+  }
+
+  .github-access-row {
+    display: grid;
+  }
+
   .settings-footer-actions {
     display: grid;
     grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .github-access-toggle {
     width: 100%;
   }
 

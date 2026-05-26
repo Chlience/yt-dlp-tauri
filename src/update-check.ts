@@ -3,6 +3,8 @@ export type LatestRelease = {
   releaseUrl: string;
 };
 
+export type GithubAccessMode = "direct" | "gh-proxy";
+
 export type UpdateStatus =
   | {
       kind: "available";
@@ -70,6 +72,14 @@ export function parseLatestRelease(payload: unknown): LatestRelease | null {
     tagName: release.tag_name,
     releaseUrl: release.html_url,
   };
+}
+
+export function resolveGithubUrl(url: string, accessMode: GithubAccessMode) {
+  if (accessMode === "direct" || url.startsWith("https://gh-proxy.com/")) {
+    return url;
+  }
+
+  return `https://gh-proxy.com/${url}`;
 }
 
 function normalizeVersion(version: string) {

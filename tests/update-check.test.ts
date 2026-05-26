@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compareVersions, getUpdateStatus, parseLatestRelease } from "../src/update-check.ts";
+import { compareVersions, getUpdateStatus, parseLatestRelease, resolveGithubUrl } from "../src/update-check.ts";
 
 test("compareVersions handles v-prefixed semantic versions", () => {
   assert.equal(compareVersions("0.1.0", "v0.2.0"), -1);
@@ -34,5 +34,20 @@ test("parseLatestRelease rejects incomplete GitHub responses", () => {
       tagName: "v0.2.0",
       releaseUrl: "https://github.com/Chlience/yt-dlp-tauri/releases/tag/v0.2.0",
     },
+  );
+});
+
+test("resolveGithubUrl can route GitHub URLs through gh-proxy", () => {
+  assert.equal(
+    resolveGithubUrl("https://github.com/Chlience/yt-dlp-tauri/releases", "direct"),
+    "https://github.com/Chlience/yt-dlp-tauri/releases",
+  );
+  assert.equal(
+    resolveGithubUrl("https://github.com/Chlience/yt-dlp-tauri/releases", "gh-proxy"),
+    "https://gh-proxy.com/https://github.com/Chlience/yt-dlp-tauri/releases",
+  );
+  assert.equal(
+    resolveGithubUrl("https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest", "gh-proxy"),
+    "https://gh-proxy.com/https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest",
   );
 });

@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageInfo from "../package.json";
-import { getUpdateStatus, parseLatestRelease } from "./update-check";
+import { type GithubAccessMode, getUpdateStatus, parseLatestRelease, resolveGithubUrl } from "./update-check";
 
 type ToolStatus = {
   name: string;
@@ -55,6 +55,7 @@ const APP_VERSION = packageInfo.version;
 const PROJECT_REPOSITORY_URL = "https://github.com/Chlience/yt-dlp-tauri";
 const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY_URL}/releases`;
 const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
+const GITHUB_ACCESS_STORAGE_KEY = "yt-dlp-tauri-github-access-mode";
 
 const translations = {
   en: {
@@ -76,7 +77,10 @@ const translations = {
     "action.repairTools": "Repair tools",
     "action.checkUpdates": "Check updates",
     "action.openRelease": "Open release",
-    "action.github": "GitHub",
+    "action.projectHome": "Project home",
+    "github.accessLabel": "GitHub access mode",
+    "github.direct": "Direct",
+    "github.proxy": "gh-proxy",
     "url.label": "Video URL",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
     "preview.thumbnailAlt": "video thumbnail",
@@ -135,6 +139,7 @@ const translations = {
     "settings.activity": "Activity",
     "settings.activityHint": "Recent local events.",
     "settings.version": "Version",
+    "settings.githubSite": "GitHub site",
     "settings.chooseFolder": "Choose download folder",
     "event.booted": "App booted.",
     "event.toolsAvailable": "yt-dlp, ffmpeg, ffprobe and deno are available.",
@@ -169,7 +174,10 @@ const translations = {
     "action.repairTools": "修复工具",
     "action.checkUpdates": "检查更新",
     "action.openRelease": "打开发布页",
-    "action.github": "GitHub",
+    "action.projectHome": "项目主页",
+    "github.accessLabel": "GitHub 访问方式",
+    "github.direct": "直连",
+    "github.proxy": "gh-proxy",
     "url.label": "视频链接",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
     "preview.thumbnailAlt": "视频缩略图",
@@ -228,6 +236,7 @@ const translations = {
     "settings.activity": "活动",
     "settings.activityHint": "最近的本地事件。",
     "settings.version": "版本",
+    "settings.githubSite": "GitHub 站点",
     "settings.chooseFolder": "选择下载目录",
     "event.booted": "应用已启动。",
     "event.toolsAvailable": "yt-dlp、ffmpeg、ffprobe 和 deno 均可用。",
@@ -261,6 +270,7 @@ const state = {
   updateChecking: false,
   latestReleaseUrl: "",
   updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
+  githubAccessMode: resolveInitialGithubAccessMode(),
   language: resolveInitialLanguage(),
 };
 
@@ -284,6 +294,8 @@ const elements = {
   checkUpdates: must<HTMLButtonElement>("#check-updates"),
   releaseLink: must<HTMLButtonElement>("#release-link"),
   githubLink: must<HTMLButtonElement>("#github-link"),
+  githubDirect: must<HTMLButtonElement>("#github-direct"),
+  githubProxy: must<HTMLButtonElement>("#github-proxy"),
   appVersion: must<HTMLElement>("#app-version"),
   updateStatus: must<HTMLElement>("#update-status"),
   folderInput: must<HTMLInputElement>("#folder-input"),
@@ -325,6 +337,10 @@ function resolveInitialLanguage(): Language {
     return stored;
   }
   return navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+}
+
+function resolveInitialGithubAccessMode(): GithubAccessMode {
+  return localStorage.getItem(GITHUB_ACCESS_STORAGE_KEY) === "gh-proxy" ? "gh-proxy" : "direct";
 }
 
 function t(key: TranslationKey, values: Record<string, string | number> = {}) {
@@ -375,6 +391,7 @@ function applyTranslations() {
   if (state.updateStatus) {
     renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
   }
+  updateGithubAccessButtons();
   updateInstallButtonLabel();
 }
 
@@ -385,6 +402,14 @@ function setLanguage(language: Language) {
   if (!state.metadata) {
     renderEmptyPreview(t("preview.emptyStart"));
   }
+}
+
+function setGithubAccessMode(accessMode: GithubAccessMode) {
+  state.githubAccessMode = accessMode;
+  localStorage.setItem(GITHUB_ACCESS_STORAGE_KEY, accessMode);
+  clearUpdateStatus();
+  updateGithubAccessButtons();
+  updateButtons();
 }
 
 function setSettingsOpen(isOpen: boolean) {
@@ -418,6 +443,8 @@ function bindEvents() {
   elements.checkUpdates.addEventListener("click", () => void checkForUpdates());
   elements.releaseLink.addEventListener("click", () => void openLatestRelease());
   elements.githubLink.addEventListener("click", () => void openProjectRepository());
+  elements.githubDirect.addEventListener("click", () => setGithubAccessMode("direct"));
+  elements.githubProxy.addEventListener("click", () => setGithubAccessMode("gh-proxy"));
   elements.quality.addEventListener("change", () => {
     state.selectedFormat = state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
     updateButtons();
@@ -605,7 +632,7 @@ async function openProjectRepository() {
 
 async function openLatestRelease() {
   try {
-    await openUrl(state.latestReleaseUrl || PROJECT_RELEASES_URL);
+    await openUrl(resolveGithubUrl(state.latestReleaseUrl || PROJECT_RELEASES_URL, state.githubAccessMode));
   } catch (error) {
     showNotice(String(error), "error");
   }
@@ -623,7 +650,7 @@ async function checkForUpdates() {
   updateButtons();
 
   try {
-    const response = await fetch(LATEST_RELEASE_API_URL, {
+    const response = await fetch(resolveGithubUrl(LATEST_RELEASE_API_URL, state.githubAccessMode), {
       cache: "no-store",
       headers: {
         Accept: "application/vnd.github+json",
@@ -816,6 +843,8 @@ function updateButtons() {
   elements.saveFolder.disabled = state.busy;
   elements.resetFolder.disabled = state.busy;
   elements.checkUpdates.disabled = state.updateChecking;
+  elements.githubDirect.disabled = state.updateChecking;
+  elements.githubProxy.disabled = state.updateChecking;
 }
 
 function showNotice(message: string, tone: NoticeTone) {
@@ -831,6 +860,20 @@ function renderUpdateStatus(message: string, tone: UpdateTone) {
 function setUpdateStatus(key: TranslationKey, tone: UpdateTone, values: Record<string, string | number> = {}) {
   state.updateStatus = { key, values, tone };
   renderUpdateStatus(t(key, values), tone);
+}
+
+function clearUpdateStatus() {
+  state.latestReleaseUrl = "";
+  state.updateStatus = null;
+  elements.releaseLink.hidden = true;
+  renderUpdateStatus("", "neutral");
+}
+
+function updateGithubAccessButtons() {
+  elements.githubDirect.classList.toggle("is-active", state.githubAccessMode === "direct");
+  elements.githubProxy.classList.toggle("is-active", state.githubAccessMode === "gh-proxy");
+  elements.githubDirect.setAttribute("aria-pressed", String(state.githubAccessMode === "direct"));
+  elements.githubProxy.setAttribute("aria-pressed", String(state.githubAccessMode === "gh-proxy"));
 }
 
 function logEvent(message: string) {
