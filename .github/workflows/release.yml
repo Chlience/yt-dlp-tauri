@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    name: Windows x64 NSIS
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Test frontend
+        run: npm test
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path .\src-tauri\Cargo.toml --lib
+
+      - name: Check Rust backend
+        run: cargo check --manifest-path .\src-tauri\Cargo.toml
+
+      - name: Build and draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: yt-dlp-tauri v__VERSION__
+          releaseBody: |
+            Windows x64 preview release.
+
+            This release builds the NSIS installer from the pinned source tree. The app installs its Windows toolchain from fixed URLs and verifies SHA-256 hashes at runtime.
+
+            See README.md and THIRD-PARTY-NOTICES.md before redistribution.
+          releaseDraft: true
+          prerelease: true
