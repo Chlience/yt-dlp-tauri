@@ -463,13 +463,52 @@ progress::-webkit-progress-value {
 }
 
 .settings-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 20px 18px;
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 9px;
+  border-top: 1px solid var(--stroke);
+  background: color-mix(in oklch, var(--surface), transparent 2%);
+  padding: 12px 20px 14px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.settings-meta {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.update-status {
+  min-width: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.update-status:empty {
+  display: none;
+}
+
+.update-status.is-success {
+  color: var(--success);
+}
+
+.update-status.is-warning {
+  color: var(--warning);
+}
+
+.update-status.is-error {
+  color: var(--danger);
+}
+
+.settings-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
 }
 
 .settings-footer .button {
@@ -603,6 +642,16 @@ progress::-webkit-progress-value {
   }
 
   .language-toggle {
+    width: 100%;
+  }
+
+  .settings-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-footer-actions {
+    display: grid;
+    grid-template-columns: 1fr;
     width: 100%;
   }
 

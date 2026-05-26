@@ -123,11 +123,18 @@
       </section>
 
       <footer class="settings-footer">
-        <span>
-          <span data-i18n="settings.version">Version</span>
-          <span id="app-version">0.1.0</span>
-        </span>
-        <button id="github-link" class="button secondary" type="button" data-i18n="action.github">GitHub</button>
+        <div class="settings-meta">
+          <span>
+            <span data-i18n="settings.version">Version</span>
+            <span id="app-version">0.1.0</span>
+          </span>
+          <span id="update-status" class="update-status" aria-live="polite"></span>
+        </div>
+        <div class="settings-footer-actions">
+          <button id="check-updates" class="button secondary" type="button" data-i18n="action.checkUpdates">Check updates</button>
+          <button id="release-link" class="button secondary" type="button" hidden data-i18n="action.openRelease">Open release</button>
+          <button id="github-link" class="button secondary" type="button" data-i18n="action.github">GitHub</button>
+        </div>
       </footer>
     </aside>
   </body>

@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageInfo from "../package.json";
+import { getUpdateStatus, parseLatestRelease } from "./update-check";
 
 type ToolStatus = {
   name: string;
@@ -52,6 +53,8 @@ type ToolInstallProgress = {
 
 const APP_VERSION = packageInfo.version;
 const PROJECT_REPOSITORY_URL = "https://github.com/Chlience/yt-dlp-tauri";
+const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY_URL}/releases`;
+const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
 
 const translations = {
   en: {
@@ -71,6 +74,8 @@ const translations = {
     "action.refresh": "Refresh",
     "action.installTools": "Install tools",
     "action.repairTools": "Repair tools",
+    "action.checkUpdates": "Check updates",
+    "action.openRelease": "Open release",
     "action.github": "GitHub",
     "url.label": "Video URL",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
@@ -105,6 +110,12 @@ const translations = {
     "notice.downloadCancelled": "Download cancelled.",
     "notice.folderUpdated": "Download folder updated.",
     "notice.folderReset": "Download folder reset.",
+    "updates.checking": "Checking GitHub releases...",
+    "updates.available": "New version available: {version}",
+    "updates.current": "You are up to date.",
+    "updates.noRelease": "No GitHub release found yet.",
+    "updates.invalidRelease": "GitHub returned an unreadable release.",
+    "updates.failed": "Could not check updates: {message}",
     "settings.kicker": "Preferences",
     "settings.title": "Settings",
     "settings.outputFolder": "Output folder",
@@ -156,6 +167,8 @@ const translations = {
     "action.refresh": "刷新",
     "action.installTools": "安装工具",
     "action.repairTools": "修复工具",
+    "action.checkUpdates": "检查更新",
+    "action.openRelease": "打开发布页",
     "action.github": "GitHub",
     "url.label": "视频链接",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
@@ -190,6 +203,12 @@ const translations = {
     "notice.downloadCancelled": "下载已取消。",
     "notice.folderUpdated": "下载目录已更新。",
     "notice.folderReset": "下载目录已重置。",
+    "updates.checking": "正在检查 GitHub Releases...",
+    "updates.available": "发现新版本：{version}",
+    "updates.current": "当前已是最新版本。",
+    "updates.noRelease": "暂未找到 GitHub Release。",
+    "updates.invalidRelease": "GitHub 返回的发布信息无法读取。",
+    "updates.failed": "检查更新失败：{message}",
     "settings.kicker": "偏好",
     "settings.title": "设置",
     "settings.outputFolder": "输出目录",
@@ -229,6 +248,7 @@ const translations = {
 type Language = keyof typeof translations;
 type TranslationKey = keyof (typeof translations)["en"];
 type NoticeTone = "success" | "warning" | "error";
+type UpdateTone = "neutral" | "success" | "warning" | "error";
 
 const state = {
   metadata: null as VideoMetadata | null,
@@ -238,6 +258,9 @@ const state = {
   cancelRequested: false,
   lastUrl: "",
   toolsReady: false,
+  updateChecking: false,
+  latestReleaseUrl: "",
+  updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
   language: resolveInitialLanguage(),
 };
 
@@ -258,8 +281,11 @@ const elements = {
   browseFolder: must<HTMLButtonElement>("#browse-folder"),
   resetFolder: must<HTMLButtonElement>("#reset-folder"),
   saveFolder: must<HTMLButtonElement>("#save-folder"),
+  checkUpdates: must<HTMLButtonElement>("#check-updates"),
+  releaseLink: must<HTMLButtonElement>("#release-link"),
   githubLink: must<HTMLButtonElement>("#github-link"),
   appVersion: must<HTMLElement>("#app-version"),
+  updateStatus: must<HTMLElement>("#update-status"),
   folderInput: must<HTMLInputElement>("#folder-input"),
   folderText: must<HTMLElement>("#folder-text"),
   toolRoot: must<HTMLElement>("#tool-root"),
@@ -346,6 +372,9 @@ function applyTranslations() {
   elements.languageEn.setAttribute("aria-pressed", String(state.language === "en"));
   elements.languageZh.setAttribute("aria-pressed", String(state.language === "zh"));
   elements.appVersion.textContent = APP_VERSION;
+  if (state.updateStatus) {
+    renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
+  }
   updateInstallButtonLabel();
 }
 
@@ -386,6 +415,8 @@ function bindEvents() {
   elements.browseFolder.addEventListener("click", () => void browseDownloadFolder());
   elements.saveFolder.addEventListener("click", () => void saveDownloadFolder());
   elements.resetFolder.addEventListener("click", () => void resetDownloadFolder());
+  elements.checkUpdates.addEventListener("click", () => void checkForUpdates());
+  elements.releaseLink.addEventListener("click", () => void openLatestRelease());
   elements.githubLink.addEventListener("click", () => void openProjectRepository());
   elements.quality.addEventListener("change", () => {
     state.selectedFormat = state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
@@ -572,6 +603,64 @@ async function openProjectRepository() {
   }
 }
 
+async function openLatestRelease() {
+  try {
+    await openUrl(state.latestReleaseUrl || PROJECT_RELEASES_URL);
+  } catch (error) {
+    showNotice(String(error), "error");
+  }
+}
+
+async function checkForUpdates() {
+  if (state.updateChecking) {
+    return;
+  }
+
+  state.updateChecking = true;
+  state.latestReleaseUrl = "";
+  elements.releaseLink.hidden = true;
+  setUpdateStatus("updates.checking", "neutral");
+  updateButtons();
+
+  try {
+    const response = await fetch(LATEST_RELEASE_API_URL, {
+      cache: "no-store",
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    if (response.status === 404) {
+      setUpdateStatus("updates.noRelease", "warning");
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`.trim());
+    }
+
+    const latestRelease = parseLatestRelease(await response.json());
+    if (!latestRelease) {
+      setUpdateStatus("updates.invalidRelease", "error");
+      return;
+    }
+
+    const updateStatus = getUpdateStatus(APP_VERSION, latestRelease);
+    if (updateStatus.kind === "available") {
+      state.latestReleaseUrl = updateStatus.releaseUrl;
+      elements.releaseLink.hidden = false;
+      setUpdateStatus("updates.available", "success", { version: updateStatus.latestVersion });
+    } else {
+      setUpdateStatus("updates.current", "success");
+    }
+  } catch (error) {
+    setUpdateStatus("updates.failed", "error", { message: error instanceof Error ? error.message : String(error) });
+  } finally {
+    state.updateChecking = false;
+    updateButtons();
+  }
+}
+
 async function browseDownloadFolder() {
   try {
     const selected = await open({
@@ -726,11 +815,22 @@ function updateButtons() {
   elements.browseFolder.disabled = state.busy;
   elements.saveFolder.disabled = state.busy;
   elements.resetFolder.disabled = state.busy;
+  elements.checkUpdates.disabled = state.updateChecking;
 }
 
 function showNotice(message: string, tone: NoticeTone) {
   elements.notice.textContent = message;
   elements.notice.className = `notice is-${tone}`;
+}
+
+function renderUpdateStatus(message: string, tone: UpdateTone) {
+  elements.updateStatus.textContent = message;
+  elements.updateStatus.className = `update-status is-${tone}`;
+}
+
+function setUpdateStatus(key: TranslationKey, tone: UpdateTone, values: Record<string, string | number> = {}) {
+  state.updateStatus = { key, values, tone };
+  renderUpdateStatus(t(key, values), tone);
 }
 
 function logEvent(message: string) {
