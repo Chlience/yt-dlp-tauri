@@ -26,6 +26,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 struct AppState {
     download_directory: String,
     tools_root: String,
+    cookies_file: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,10 +152,7 @@ async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let tools = locate_tools(&app)?;
         ensure_writable_directories()?;
-        Ok(AppState {
-            download_directory: download_directory()?.display().to_string(),
-            tools_root: tools.root.display().to_string(),
-        })
+        build_app_state(tools.root.display().to_string())
     })
     .await
     .map_err(join_error)?
@@ -178,10 +176,7 @@ async fn set_download_directory(directory: String) -> Result<AppState, String> {
         )
         .map_err(to_string)?;
 
-        Ok(AppState {
-            download_directory: path.display().to_string(),
-            tools_root: String::new(),
-        })
+        build_app_state(String::new())
     })
     .await
     .map_err(join_error)?
@@ -197,10 +192,45 @@ async fn reset_download_directory() -> Result<AppState, String> {
 
         let directory = download_directory()?;
         fs::create_dir_all(&directory).map_err(to_string)?;
-        Ok(AppState {
-            download_directory: directory.display().to_string(),
-            tools_root: String::new(),
-        })
+        build_app_state(String::new())
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn set_cookies_file(path: String) -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Err("Cookie file cannot be empty.".to_string());
+        }
+
+        let path = PathBuf::from(trimmed);
+        validate_cookies_file_path(&path)?;
+        let state_dir = state_directory()?;
+        fs::create_dir_all(&state_dir).map_err(to_string)?;
+        fs::write(
+            state_dir.join("cookies-file.txt"),
+            path.display().to_string(),
+        )
+        .map_err(to_string)?;
+
+        build_app_state(String::new())
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn clear_cookies_file() -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state_file = cookies_file_state_path()?;
+        if state_file.exists() {
+            fs::remove_file(state_file).map_err(to_string)?;
+        }
+
+        build_app_state(String::new())
     })
     .await
     .map_err(join_error)?
@@ -318,6 +348,7 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
         validate_http_url(&url)?;
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
+        let cookies_file = validated_cookies_file()?;
         append_log("metadata", &format!("Parsing {url}"));
 
         let mut command = background_command(&tools.yt_dlp);
@@ -331,6 +362,7 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
             .arg(&tools.ffmpeg_dir)
             .args(["--js-runtimes"])
             .arg(format!("deno:{}", tools.deno.display()))
+            .args(yt_dlp_cookie_args(cookies_file.as_deref()))
             .arg(&url)
             .output()
             .map_err(|error| {
@@ -370,6 +402,7 @@ async fn download_video(
         require_tools(&tools)?;
         ensure_writable_directories()?;
         let output_dir = download_directory()?;
+        let cookies_file = validated_cookies_file()?;
         append_log("download", &format!("Starting {} {}", request.label, request.url));
 
         let mut command = background_command(&tools.yt_dlp);
@@ -391,6 +424,7 @@ async fn download_video(
             .arg(&tools.ffmpeg_dir)
             .args(["--js-runtimes"])
             .arg(format!("deno:{}", tools.deno.display()))
+            .args(yt_dlp_cookie_args(cookies_file.as_deref()))
             .args([
                 "--progress-template",
                 &format!(
@@ -1391,6 +1425,14 @@ fn was_cancel_requested(state: &DownloadProcessState) -> bool {
         .unwrap_or(false)
 }
 
+fn build_app_state(tools_root: String) -> Result<AppState, String> {
+    Ok(AppState {
+        download_directory: download_directory()?.display().to_string(),
+        tools_root,
+        cookies_file: cookies_file()?.map(|path| path.display().to_string()),
+    })
+}
+
 fn kill_process_tree(pid: u32) -> Result<(), String> {
     let pid_text = pid.to_string();
     let mut command = if cfg!(target_os = "windows") {
@@ -1430,6 +1472,48 @@ fn download_directory() -> Result<PathBuf, String> {
     }
 
     Ok(default_download_directory())
+}
+
+fn cookies_file() -> Result<Option<PathBuf>, String> {
+    let configured = cookies_file_state_path()?;
+    if configured.exists() {
+        let value = fs::read_to_string(configured).map_err(to_string)?;
+        let value = value.trim();
+        if !value.is_empty() {
+            return Ok(Some(PathBuf::from(value)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn validated_cookies_file() -> Result<Option<PathBuf>, String> {
+    let Some(path) = cookies_file()? else {
+        return Ok(None);
+    };
+
+    validate_cookies_file_path(&path)?;
+    Ok(Some(path))
+}
+
+fn validate_cookies_file_path(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err(format!("Cookie file does not exist: {}", path.display()));
+    }
+
+    fs::File::open(path)
+        .map(|_| ())
+        .map_err(|error| format!("Cookie file cannot be opened: {}: {error}", path.display()))
+}
+
+fn cookies_file_state_path() -> Result<PathBuf, String> {
+    Ok(state_directory()?.join("cookies-file.txt"))
+}
+
+fn yt_dlp_cookie_args(cookies_file: Option<&Path>) -> Vec<String> {
+    cookies_file
+        .map(|path| vec!["--cookies".to_string(), path.display().to_string()])
+        .unwrap_or_default()
 }
 
 fn default_download_directory() -> PathBuf {
@@ -1698,7 +1782,8 @@ mod tests {
 
             for tool in &target.tools {
                 assert!(
-                    tool.path.starts_with(&format!("{TOOLS_DIRECTORY}/{target_name}/")),
+                    tool.path
+                        .starts_with(&format!("{TOOLS_DIRECTORY}/{target_name}/")),
                     "{} for {} has path outside its target: {}",
                     tool.name,
                     target_name,
@@ -1706,6 +1791,21 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn omits_cookie_args_without_configured_file() {
+        assert!(yt_dlp_cookie_args(None).is_empty());
+    }
+
+    #[test]
+    fn passes_configured_cookie_file_to_yt_dlp() {
+        let args = yt_dlp_cookie_args(Some(Path::new("account-cookies.txt")));
+
+        assert_eq!(
+            args,
+            vec!["--cookies".to_string(), "account-cookies.txt".to_string()]
+        );
     }
 
     #[test]
@@ -1777,6 +1877,8 @@ pub fn run() {
             get_app_state,
             set_download_directory,
             reset_download_directory,
+            set_cookies_file,
+            clear_cookies_file,
             open_download_directory,
             check_tools,
             install_tools,

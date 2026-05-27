@@ -287,6 +287,52 @@ label {
   gap: 10px;
 }
 
+.cookie-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 38px;
+}
+
+.cookie-status {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.cookie-label {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.cookie-file {
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cookie-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.button.compact {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 0.84rem;
+}
+
 .preview-panel {
   display: grid;
   min-width: 0;
@@ -665,7 +711,8 @@ progress::-webkit-progress-value {
     padding: 18px;
   }
 
-  .url-row {
+  .url-row,
+  .cookie-row {
     grid-template-columns: 1fr;
   }
 
@@ -679,6 +726,7 @@ progress::-webkit-progress-value {
 @media (max-width: 440px) {
   .top-actions,
   .download-actions,
+  .cookie-actions,
   .split-actions,
   .tool-actions {
     display: grid;

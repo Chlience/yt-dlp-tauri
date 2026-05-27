@@ -37,6 +37,7 @@ type VideoMetadata = {
 type AppState = {
   download_directory: string;
   tools_root: string;
+  cookies_file?: string | null;
 };
 
 type DownloadProgress = {
@@ -74,6 +75,8 @@ const translations = {
     "action.browse": "Browse",
     "action.save": "Save",
     "action.reset": "Reset",
+    "action.chooseCookies": "Choose cookies.txt",
+    "action.clearCookies": "Clear",
     "action.refresh": "Refresh",
     "action.installTools": "Install tools",
     "action.repairTools": "Repair tools",
@@ -85,12 +88,16 @@ const translations = {
     "github.proxy": "gh-proxy",
     "url.label": "Video URL",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
+    "cookies.label": "Cookie file",
+    "cookies.none": "No cookies",
+    "cookies.chooseFile": "Choose cookies.txt",
     "preview.thumbnailAlt": "video thumbnail",
     "preview.emptyImage": "Preview",
     "preview.label": "Preview",
     "preview.noVideo": "No video parsed",
     "preview.emptyStart": "Paste a video URL to inspect title, cover, duration, and qualities.",
     "preview.emptyChanged": "Paste a URL and parse it before downloading.",
+    "preview.cookiesChanged": "Cookie file changed. Parse again before downloading.",
     "preview.readingMetadata": "Reading metadata from yt-dlp...",
     "preview.parseFailed": "Metadata parsing failed. Check the URL and tools.",
     "preview.noDescription": "No description returned by yt-dlp.",
@@ -118,6 +125,8 @@ const translations = {
     "notice.downloadCancelled": "Download cancelled.",
     "notice.folderUpdated": "Download folder updated.",
     "notice.folderReset": "Download folder reset.",
+    "notice.cookiesUpdated": "Cookie file updated.",
+    "notice.cookiesCleared": "Cookie file cleared.",
     "updates.checking": "Checking GitHub releases...",
     "updates.available": "New version available: {version}",
     "updates.current": "You are up to date.",
@@ -160,6 +169,8 @@ const translations = {
     "event.downloadCancelled": "Download cancelled.",
     "event.downloadFailed": "Download failed.",
     "event.cancelRequested": "Cancel requested.",
+    "event.cookiesUpdated": "Cookie file selected: {file}",
+    "event.cookiesCleared": "Cookie file cleared.",
   },
   zh: {
     "app.title": "yt-dlp-tauri",
@@ -175,6 +186,8 @@ const translations = {
     "action.browse": "浏览",
     "action.save": "保存",
     "action.reset": "重置",
+    "action.chooseCookies": "选择 cookies.txt",
+    "action.clearCookies": "清除",
     "action.refresh": "刷新",
     "action.installTools": "安装工具",
     "action.repairTools": "修复工具",
@@ -186,12 +199,16 @@ const translations = {
     "github.proxy": "gh-proxy",
     "url.label": "视频链接",
     "url.placeholder": "https://www.youtube.com/watch?v=...",
+    "cookies.label": "Cookie 文件",
+    "cookies.none": "未使用 Cookie",
+    "cookies.chooseFile": "选择 cookies.txt",
     "preview.thumbnailAlt": "视频缩略图",
     "preview.emptyImage": "预览",
     "preview.label": "预览",
     "preview.noVideo": "尚未解析视频",
     "preview.emptyStart": "粘贴视频链接后解析，可查看标题、封面、时长和清晰度。",
     "preview.emptyChanged": "请先解析当前链接，再开始下载。",
+    "preview.cookiesChanged": "Cookie 文件已变更，请重新解析后再下载。",
     "preview.readingMetadata": "正在通过 yt-dlp 读取信息...",
     "preview.parseFailed": "解析失败。请检查链接和工具链。",
     "preview.noDescription": "yt-dlp 未返回描述。",
@@ -219,6 +236,8 @@ const translations = {
     "notice.downloadCancelled": "下载已取消。",
     "notice.folderUpdated": "下载目录已更新。",
     "notice.folderReset": "下载目录已重置。",
+    "notice.cookiesUpdated": "Cookie 文件已更新。",
+    "notice.cookiesCleared": "Cookie 文件已清除。",
     "updates.checking": "正在检查 GitHub Releases...",
     "updates.available": "发现新版本：{version}",
     "updates.current": "当前已是最新版本。",
@@ -261,6 +280,8 @@ const translations = {
     "event.downloadCancelled": "下载已取消。",
     "event.downloadFailed": "下载失败。",
     "event.cancelRequested": "已请求取消。",
+    "event.cookiesUpdated": "已选择 Cookie 文件：{file}",
+    "event.cookiesCleared": "Cookie 文件已清除。",
   },
 } as const;
 
@@ -281,6 +302,7 @@ const state = {
   latestReleaseUrl: "",
   updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
   githubAccessMode: resolveInitialGithubAccessMode(),
+  cookiesFile: null as string | null,
   language: resolveInitialLanguage(),
   thumbnailCandidates: [] as string[],
   thumbnailCandidateIndex: 0,
@@ -292,6 +314,8 @@ const elements = {
   download: must<HTMLButtonElement>("#download"),
   cancel: must<HTMLButtonElement>("#cancel"),
   openFolder: must<HTMLButtonElement>("#open-folder"),
+  chooseCookies: must<HTMLButtonElement>("#choose-cookies"),
+  clearCookies: must<HTMLButtonElement>("#clear-cookies"),
   settingsToggle: must<HTMLButtonElement>("#settings-toggle"),
   settingsClose: must<HTMLButtonElement>("#settings-close"),
   settingsBackdrop: must<HTMLElement>("#settings-backdrop"),
@@ -312,6 +336,7 @@ const elements = {
   updateStatus: must<HTMLElement>("#update-status"),
   folderInput: must<HTMLInputElement>("#folder-input"),
   folderText: must<HTMLElement>("#folder-text"),
+  cookiesFile: must<HTMLElement>("#cookies-file"),
   toolRoot: must<HTMLElement>("#tool-root"),
   toolList: must<HTMLElement>("#tool-list"),
   toolInstallStatus: must<HTMLElement>("#tool-install-status"),
@@ -403,6 +428,7 @@ function applyTranslations() {
   if (state.updateStatus) {
     renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
   }
+  renderCookiesFile(state.cookiesFile);
   updateGithubAccessButtons();
   updateInstallButtonLabel();
 }
@@ -441,6 +467,8 @@ function bindEvents() {
   elements.parse.addEventListener("click", () => void parseCurrentUrl());
   elements.download.addEventListener("click", () => void downloadCurrentVideo());
   elements.cancel.addEventListener("click", () => void cancelCurrentDownload());
+  elements.chooseCookies.addEventListener("click", () => void chooseCookiesFile());
+  elements.clearCookies.addEventListener("click", () => void clearCookiesFile());
   elements.settingsToggle.addEventListener("click", () => setSettingsOpen(true));
   elements.settingsClose.addEventListener("click", () => setSettingsOpen(false));
   elements.settingsBackdrop.addEventListener("click", () => setSettingsOpen(false));
@@ -465,10 +493,7 @@ function bindEvents() {
   });
   elements.url.addEventListener("input", () => {
     if (elements.url.value.trim() !== state.lastUrl) {
-      state.metadata = null;
-      state.selectedFormat = null;
-      renderEmptyPreview(t("preview.emptyChanged"));
-      renderQualityOptions([]);
+      invalidateParsedVideo(t("preview.emptyChanged"));
     }
     updateButtons();
   });
@@ -499,6 +524,7 @@ async function loadAppState() {
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
   elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
+  renderCookiesFile(appState.cookies_file ?? null);
 }
 
 async function refreshTools() {
@@ -751,6 +777,48 @@ async function resetDownloadFolder() {
   }
 }
 
+async function chooseCookiesFile() {
+  if (state.busy) {
+    return;
+  }
+
+  try {
+    const selected = await open({
+      title: t("cookies.chooseFile"),
+      directory: false,
+      multiple: false,
+      defaultPath: state.cookiesFile || undefined,
+      filters: [{ name: "cookies.txt", extensions: ["txt"] }],
+    });
+
+    if (typeof selected === "string") {
+      const appState = await invoke<AppState>("set_cookies_file", { path: selected });
+      renderCookiesFile(appState.cookies_file ?? null);
+      invalidateParsedVideo(t("preview.cookiesChanged"));
+      showNotice(t("notice.cookiesUpdated"), "success");
+      logEvent(t("event.cookiesUpdated", { file: fileNameFromPath(appState.cookies_file || selected) }));
+    }
+  } catch (error) {
+    showNotice(String(error), "error");
+  }
+}
+
+async function clearCookiesFile() {
+  if (state.busy || !state.cookiesFile) {
+    return;
+  }
+
+  try {
+    const appState = await invoke<AppState>("clear_cookies_file");
+    renderCookiesFile(appState.cookies_file ?? null);
+    invalidateParsedVideo(t("preview.cookiesChanged"));
+    showNotice(t("notice.cookiesCleared"), "success");
+    logEvent(t("event.cookiesCleared"));
+  } catch (error) {
+    showNotice(String(error), "error");
+  }
+}
+
 function renderMetadata(metadata: VideoMetadata) {
   elements.title.textContent = metadata.title;
   elements.details.textContent = [
@@ -770,6 +838,14 @@ function renderEmptyPreview(message: string) {
   elements.details.textContent = message;
   elements.description.textContent = "";
   clearThumbnail();
+}
+
+function invalidateParsedVideo(message: string) {
+  state.metadata = null;
+  state.selectedFormat = null;
+  state.lastUrl = "";
+  renderEmptyPreview(message);
+  renderQualityOptions([]);
 }
 
 function renderThumbnailCandidates(urls: string[]) {
@@ -901,11 +977,20 @@ function updateInstallButtonLabel() {
   elements.installTools.textContent = t(state.toolsReady ? "action.repairTools" : "action.installTools");
 }
 
+function renderCookiesFile(file: string | null) {
+  state.cookiesFile = file?.trim() || null;
+  elements.cookiesFile.textContent = state.cookiesFile ? fileNameFromPath(state.cookiesFile) : t("cookies.none");
+  elements.cookiesFile.title = state.cookiesFile || t("cookies.none");
+  updateButtons();
+}
+
 function updateButtons() {
   const hasUrl = elements.url.value.trim().length > 0;
   elements.parse.disabled = state.busy || !hasUrl || !state.toolsReady;
   elements.download.disabled = state.busy || !state.metadata || !state.selectedFormat || !state.toolsReady;
   elements.cancel.disabled = state.activeOperation !== "download" || state.cancelRequested;
+  elements.chooseCookies.disabled = state.busy;
+  elements.clearCookies.disabled = state.busy || !state.cookiesFile;
   elements.refreshTools.disabled = state.busy;
   elements.installTools.disabled = state.busy;
   elements.browseFolder.disabled = state.busy;
@@ -975,4 +1060,8 @@ function formatDuration(seconds: number) {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
     : `${minutes}:${String(secs).padStart(2, "0")}`;
+}
+
+function fileNameFromPath(path: string) {
+  return path.replace(/\\/g, "/").split("/").filter(Boolean).pop() || path;
 }
