@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.1.4 - 2026-05-27
+
+### 中文
+
+- 新增首页 Cookie 文件选择入口，便于在不同平台或账号之间频繁切换 `cookies.txt`。
+- 解析视频信息和下载视频时都会把已选择的 Cookie 文件传给 `yt-dlp`。
+- 切换或清除 Cookie 文件后会清空当前解析结果，提示重新解析，避免沿用旧账号状态。
+
+### English
+
+- Added a home-screen Cookie file picker for switching `cookies.txt` across platforms or accounts.
+- Passed the selected Cookie file to `yt-dlp` for both metadata parsing and downloads.
+- Cleared parsed metadata after changing or clearing the Cookie file so downloads use the current account state.
+
 ## 0.1.3 - 2026-05-27
 
 ### 中文

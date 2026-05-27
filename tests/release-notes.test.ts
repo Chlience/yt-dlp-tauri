@@ -68,7 +68,7 @@ test("extractReleaseNotes requires bilingual release sections", () => {
 });
 
 test("production changelog release notes are bilingual", () => {
-  const releaseNotes = extractReleaseNotes(readFileSync("CHANGELOG.md", "utf8"), "v0.1.3");
+  const releaseNotes = extractReleaseNotes(readFileSync("CHANGELOG.md", "utf8"), "v0.1.4");
 
   assert.match(releaseNotes, /^### 中文$/m);
   assert.match(releaseNotes, /^### English$/m);

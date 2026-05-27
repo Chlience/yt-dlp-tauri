@@ -5052,7 +5052,7 @@ dependencies = [
 
 [[package]]
 name = "yt-dlp-tauri"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_json",

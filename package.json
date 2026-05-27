@@ -1,7 +1,7 @@
 {
   "name": "yt-dlp-tauri",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A minimal Tauri desktop downloader powered by yt-dlp.",
   "license": "GPL-3.0-only",
   "repository": {
