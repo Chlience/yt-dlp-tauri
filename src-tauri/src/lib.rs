@@ -16,7 +16,6 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager};
 
 const TOOLS_DIRECTORY: &str = "Tools";
-const DEFAULT_TOOL_TARGET: &str = "win-x64";
 const TOOLS_MANIFEST_FILE: &str = "tools-manifest.json";
 const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
@@ -85,13 +84,24 @@ struct ToolInstallProgress {
 
 #[derive(Debug, Clone)]
 struct ToolPaths {
-    target: String,
     root: PathBuf,
     yt_dlp: PathBuf,
+    yt_dlp_relative_path: String,
     ffmpeg: PathBuf,
+    ffmpeg_relative_path: String,
     ffmpeg_dir: PathBuf,
     ffprobe: PathBuf,
+    ffprobe_relative_path: String,
     deno: PathBuf,
+    deno_relative_path: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ToolNames {
+    yt_dlp: &'static str,
+    ffmpeg: &'static str,
+    ffprobe: &'static str,
+    deno: &'static str,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -139,7 +149,7 @@ struct DownloadProcessState {
 #[tauri::command]
 async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let tools = locate_tools(&app);
+        let tools = locate_tools(&app)?;
         ensure_writable_directories()?;
         Ok(AppState {
             download_directory: download_directory()?.display().to_string(),
@@ -210,29 +220,29 @@ async fn open_download_directory() -> Result<(), String> {
 #[tauri::command]
 async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let tools = locate_tools(&app);
+        let tools = locate_tools(&app)?;
         Ok(vec![
             probe_tool(
                 "yt-dlp",
-                &tool_relative_path(&tools.target, "yt-dlp/yt-dlp.exe"),
+                &tools.yt_dlp_relative_path,
                 &tools.yt_dlp,
                 &["--version"],
             ),
             probe_tool(
                 "ffmpeg",
-                &tool_relative_path(&tools.target, "ffmpeg/bin/ffmpeg.exe"),
+                &tools.ffmpeg_relative_path,
                 &tools.ffmpeg,
                 &["-version"],
             ),
             probe_tool(
                 "ffprobe",
-                &tool_relative_path(&tools.target, "ffmpeg/bin/ffprobe.exe"),
+                &tools.ffprobe_relative_path,
                 &tools.ffprobe,
                 &["-version"],
             ),
             probe_tool(
                 "deno",
-                &tool_relative_path(&tools.target, "deno/deno.exe"),
+                &tools.deno_relative_path,
                 &tools.deno,
                 &["--version"],
             ),
@@ -245,7 +255,7 @@ async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
 #[tauri::command]
 async fn install_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let target_name = current_tool_target();
+        let target_name = current_tool_target()?;
         let target = read_manifest_target(&app, &target_name)?;
         let root = writable_tools_root(&target_name)?;
         fs::create_dir_all(&root).map_err(to_string)?;
@@ -270,29 +280,29 @@ async fn install_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
             },
         );
 
-        let tools = locate_tools(&app);
+        let tools = locate_tools(&app)?;
         Ok(vec![
             probe_tool(
                 "yt-dlp",
-                &tool_relative_path(&tools.target, "yt-dlp/yt-dlp.exe"),
+                &tools.yt_dlp_relative_path,
                 &tools.yt_dlp,
                 &["--version"],
             ),
             probe_tool(
                 "ffmpeg",
-                &tool_relative_path(&tools.target, "ffmpeg/bin/ffmpeg.exe"),
+                &tools.ffmpeg_relative_path,
                 &tools.ffmpeg,
                 &["-version"],
             ),
             probe_tool(
                 "ffprobe",
-                &tool_relative_path(&tools.target, "ffmpeg/bin/ffprobe.exe"),
+                &tools.ffprobe_relative_path,
                 &tools.ffprobe,
                 &["-version"],
             ),
             probe_tool(
                 "deno",
-                &tool_relative_path(&tools.target, "deno/deno.exe"),
+                &tools.deno_relative_path,
                 &tools.deno,
                 &["--version"],
             ),
@@ -306,7 +316,7 @@ async fn install_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
 async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&url)?;
-        let tools = locate_tools(&app);
+        let tools = locate_tools(&app)?;
         require_tools(&tools)?;
         append_log("metadata", &format!("Parsing {url}"));
 
@@ -356,7 +366,7 @@ async fn download_video(
 
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&request.url)?;
-        let tools = locate_tools(&app);
+        let tools = locate_tools(&app)?;
         require_tools(&tools)?;
         ensure_writable_directories()?;
         let output_dir = download_directory()?;
@@ -511,8 +521,10 @@ async fn cancel_download(
         .map_err(join_error)?
 }
 
-fn locate_tools(app: &AppHandle) -> ToolPaths {
-    let target = current_tool_target();
+fn locate_tools(app: &AppHandle) -> Result<ToolPaths, String> {
+    let target = current_tool_target()?;
+    let names = tool_names_for_target(&target)
+        .ok_or_else(|| format!("Unsupported tool target: {target}."))?;
     let mut roots = Vec::new();
     if let Ok(root) = writable_tools_root(&target) {
         roots.push(root);
@@ -546,7 +558,7 @@ fn locate_tools(app: &AppHandle) -> ToolPaths {
 
     let root = roots
         .into_iter()
-        .find(|root| root.join("yt-dlp").join("yt-dlp.exe").exists())
+        .find(|root| root.join("yt-dlp").join(names.yt_dlp).exists())
         .unwrap_or_else(|| {
             writable_tools_root(&target).unwrap_or_else(|_| {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -555,38 +567,71 @@ fn locate_tools(app: &AppHandle) -> ToolPaths {
             })
         });
 
-    ToolPaths {
-        target,
-        yt_dlp: root.join("yt-dlp").join("yt-dlp.exe"),
-        ffmpeg: root.join("ffmpeg").join("bin").join("ffmpeg.exe"),
+    Ok(ToolPaths {
+        yt_dlp: root.join("yt-dlp").join(names.yt_dlp),
+        yt_dlp_relative_path: tool_relative_path(&target, &["yt-dlp", names.yt_dlp]),
+        ffmpeg: root.join("ffmpeg").join("bin").join(names.ffmpeg),
+        ffmpeg_relative_path: tool_relative_path(&target, &["ffmpeg", "bin", names.ffmpeg]),
         ffmpeg_dir: root.join("ffmpeg").join("bin"),
-        ffprobe: root.join("ffmpeg").join("bin").join("ffprobe.exe"),
-        deno: root.join("deno").join("deno.exe"),
+        ffprobe: root.join("ffmpeg").join("bin").join(names.ffprobe),
+        ffprobe_relative_path: tool_relative_path(&target, &["ffmpeg", "bin", names.ffprobe]),
+        deno: root.join("deno").join(names.deno),
+        deno_relative_path: tool_relative_path(&target, &["deno", names.deno]),
         root,
-    }
+    })
 }
 
 fn tool_target_from(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("windows", "x86_64") => Some("win-x64"),
         ("windows", "aarch64") => Some("win-arm64"),
+        ("macos", "x86_64") => Some("macos-x64"),
+        ("macos", "aarch64") => Some("macos-arm64"),
         _ => None,
     }
 }
 
-fn current_tool_target() -> String {
-    env::var("YT_DLP_WINDOWS_TOOL_TARGET")
+fn tool_names_for_target(target: &str) -> Option<ToolNames> {
+    match target {
+        "win-x64" | "win-arm64" => Some(ToolNames {
+            yt_dlp: "yt-dlp.exe",
+            ffmpeg: "ffmpeg.exe",
+            ffprobe: "ffprobe.exe",
+            deno: "deno.exe",
+        }),
+        "macos-x64" | "macos-arm64" => Some(ToolNames {
+            yt_dlp: "yt-dlp",
+            ffmpeg: "ffmpeg",
+            ffprobe: "ffprobe",
+            deno: "deno",
+        }),
+        _ => None,
+    }
+}
+
+fn current_tool_target() -> Result<String, String> {
+    env::var("YT_DLP_TOOL_TARGET")
+        .or_else(|_| env::var("YT_DLP_WINDOWS_TOOL_TARGET"))
         .ok()
         .filter(|value| !value.trim().is_empty())
+        .map(Ok)
         .unwrap_or_else(|| {
             tool_target_from(env::consts::OS, env::consts::ARCH)
-                .unwrap_or(DEFAULT_TOOL_TARGET)
-                .to_string()
+                .map(|target| target.to_string())
+                .ok_or_else(|| {
+                    format!(
+                        "Unsupported tool target for {}-{}. Supported targets: win-x64, win-arm64, macos-x64, macos-arm64.",
+                        env::consts::OS,
+                        env::consts::ARCH
+                    )
+                })
         })
 }
 
-fn tool_relative_path(target: &str, relative_tool_path: &str) -> String {
-    format!("{TOOLS_DIRECTORY}/{target}/{relative_tool_path}")
+fn tool_relative_path(target: &str, segments: &[&str]) -> String {
+    let mut path_segments = vec![TOOLS_DIRECTORY, target];
+    path_segments.extend_from_slice(segments);
+    path_segments.join("/")
 }
 
 fn writable_tools_root(target: &str) -> Result<PathBuf, String> {
@@ -1547,7 +1592,26 @@ mod tests {
     fn maps_supported_platform_arch_pairs_to_tool_targets() {
         assert_eq!(tool_target_from("windows", "x86_64"), Some("win-x64"));
         assert_eq!(tool_target_from("windows", "aarch64"), Some("win-arm64"));
+        assert_eq!(tool_target_from("macos", "x86_64"), Some("macos-x64"));
+        assert_eq!(tool_target_from("macos", "aarch64"), Some("macos-arm64"));
         assert_eq!(tool_target_from("linux", "x86_64"), None);
+    }
+
+    #[test]
+    fn uses_platform_specific_tool_names() {
+        let windows_tools = tool_names_for_target("win-x64").expect("windows tool names");
+        assert_eq!(windows_tools.yt_dlp, "yt-dlp.exe");
+        assert_eq!(windows_tools.ffmpeg, "ffmpeg.exe");
+        assert_eq!(windows_tools.ffprobe, "ffprobe.exe");
+        assert_eq!(windows_tools.deno, "deno.exe");
+
+        let macos_tools = tool_names_for_target("macos-arm64").expect("macos tool names");
+        assert_eq!(macos_tools.yt_dlp, "yt-dlp");
+        assert_eq!(macos_tools.ffmpeg, "ffmpeg");
+        assert_eq!(macos_tools.ffprobe, "ffprobe");
+        assert_eq!(macos_tools.deno, "deno");
+
+        assert!(tool_names_for_target("linux-x64").is_none());
     }
 
     #[test]
@@ -1604,6 +1668,41 @@ mod tests {
                     tool.name,
                     target.target,
                     tool.source_url
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn production_manifest_contains_expected_tool_targets() {
+        let manifest = include_str!("../tools-manifest.json");
+        let manifest: ToolsManifest =
+            serde_json::from_str(manifest).expect("manifest should parse");
+        let targets: BTreeMap<_, _> = manifest
+            .targets
+            .iter()
+            .map(|target| (target.target.as_str(), target))
+            .collect();
+        let expected_tools = BTreeSet::from(["deno", "ffmpeg", "ffprobe", "yt-dlp"]);
+
+        for target_name in ["win-x64", "macos-x64", "macos-arm64"] {
+            let target = targets
+                .get(target_name)
+                .unwrap_or_else(|| panic!("missing manifest target {target_name}"));
+            let tools = target
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<BTreeSet<_>>();
+            assert_eq!(tools, expected_tools, "unexpected tools for {target_name}");
+
+            for tool in &target.tools {
+                assert!(
+                    tool.path.starts_with(&format!("{TOOLS_DIRECTORY}/{target_name}/")),
+                    "{} for {} has path outside its target: {}",
+                    tool.name,
+                    target_name,
+                    tool.path
                 );
             }
         }

@@ -1,7 +1,7 @@
 <h1 align="center">yt-dlp-tauri</h1>
 
 <p align="center">
-  <strong>一个由 yt-dlp 和 Tauri 2 驱动的轻量 Windows 桌面下载器。</strong>
+  <strong>一个由 yt-dlp 和 Tauri 2 驱动的轻量 Windows/macOS 桌面下载器。</strong>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   <img alt="Rust" src="https://img.shields.io/badge/Rust-backend-B7410E?logo=rust" />
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-typed-3178C6?logo=typescript" />
   <img alt="Vite" src="https://img.shields.io/badge/Vite-build-646CFF?logo=vite" />
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-first-0078D4?logo=windows" />
+  <img alt="Windows 和 macOS" src="https://img.shields.io/badge/Windows%20%2B%20macOS-desktop-0078D4?logo=windows" />
 </p>
 
 <p align="center">
@@ -28,15 +28,15 @@
 
 ## 项目是什么？
 
-`yt-dlp-tauri` 是一个基于 `yt-dlp` 的小型桌面下载器，用来避免手写命令行参数。粘贴视频链接、预览信息、选择清晰度，然后通过专注的 Windows 桌面界面下载 MP4 友好的文件。
+`yt-dlp-tauri` 是一个基于 `yt-dlp` 的小型桌面下载器，用来避免手写命令行参数。粘贴来自 [yt-dlp 支持站点](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)的视频链接、预览信息、选择清晰度，然后通过专注的桌面界面下载 MP4 友好的文件。
 
-这个项目是 Windows-first 和 local-first 的本地工具。它不是托管下载服务，不提供多用户账号，也不隶属于 `yt-dlp`、FFmpeg、Deno 或 Tauri。
+这个项目是 desktop-first 和 local-first 的本地工具。它不是托管下载服务，不提供多用户账号，也不隶属于 `yt-dlp`、FFmpeg、Deno 或 Tauri。
 
 ## 功能
 
 - 通过 `yt-dlp` 解析视频信息，并预览标题、封面、时长、来源 URL、描述和清晰度选项。
 - 下载时显示实时进度、速度、ETA，支持取消，并保存输出目录。
-- 在 Settings 中安装、修复和校验应用管理的 Windows 工具链。
+- 在 Settings 中安装、修复和校验应用管理的平台工具链。
 - 按固定 source URL 和 SHA-256 哈希校验工具，来源记录在 pinned manifest 中。
 - 支持中英文界面切换。
 - 检查 GitHub Releases 中的应用更新，并可为更新检查和 release 链接启用 `gh-proxy`。
@@ -50,20 +50,19 @@
 | 后端 | Rust |
 | 前端 | Vanilla TypeScript, Vite |
 | UI | 固定尺寸的产品型桌面界面 |
-| 工具链 | 应用管理的 Windows `yt-dlp.exe`、`ffmpeg.exe`、`ffprobe.exe`、`deno.exe` |
-| 安装包 | NSIS bundle target |
+| 工具链 | 应用管理的 Windows/macOS `yt-dlp`、`ffmpeg`、`ffprobe`、`deno` |
+| 安装包 | Windows NSIS、macOS DMG |
 
 ## 快速开始
 
-真实应用构建请在 Windows 上执行。WSL 可以跑很多检查，但发布安装包应在 Windows + Rust MSVC toolchain 环境中构建。
+真实应用构建请在 Windows 或 macOS 上执行。WSL 可以跑很多检查，但发布安装包应在目标系统上构建，或交给 GitHub Actions release workflow。
 
 ### 1. 安装系统依赖
 
-- Windows 10/11
-- WebView2 Runtime
+- Windows 10/11 + WebView2 Runtime，或 macOS
 - Node.js 20+ 或 22+
-- Rust stable，安装 MSVC toolchain
-- PowerShell 5+ 或 PowerShell 7+
+- Rust stable，安装对应平台 toolchain
+- Windows 上需要 PowerShell 5+ 或 PowerShell 7+
 
 ### 2. 安装依赖
 
@@ -85,16 +84,17 @@ npm ci
 npm run tauri dev
 ```
 
-### 5. 构建 Windows 安装包
+### 5. 构建桌面安装包
 
 ```powershell
 npm run tauri build
 ```
 
-当前配置的 bundle target 是 `nsis`。构建产物位于：
+当前配置的 bundle target 是 `nsis` 和 `dmg`。构建产物位于对应平台目录，例如：
 
 ```text
 src-tauri\target\release\bundle\nsis\
+src-tauri/target/release/bundle/dmg/
 ```
 
 ## 配置说明
@@ -109,7 +109,7 @@ src-tauri\target\release\bundle\nsis\
 
 当前发布范围：
 
-- 已填充工具 target：`win-x64`。
+- 已填充工具 target：`win-x64`、`macos-x64`、`macos-arm64`。
 - 计划中的 manifest target：`win-arm64`，等所有工具 URL 和 hash 都固定后再补齐。
 - 仓库不提交工具二进制。
 
@@ -188,10 +188,11 @@ npm run tauri build
 发布 release 前：
 
 1. 运行上面的验证命令。
-2. 在 Windows 上构建 NSIS 安装包。
-3. 确认 `src-tauri/tools-manifest.json` 使用固定 release URL，不使用 `latest`。
-4. 确认生成目录和还原出来的工具没有被 staged。
-5. 随 release 保留 GPL 许可证和第三方声明。
+2. 推送版本 tag，例如 `v0.1.3`。
+3. 等待 `Release` workflow 把 Windows NSIS 和 macOS DMG 产物上传到 draft GitHub Release。
+4. 确认 `src-tauri/tools-manifest.json` 使用固定 release URL，不使用 `latest`。
+5. 确认生成目录和还原出来的工具没有被 staged。
+6. 随 release 保留 GPL 许可证和第三方声明。
 
 ## 法律说明
 

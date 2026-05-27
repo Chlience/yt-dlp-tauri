@@ -45,6 +45,94 @@
           "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
         }
       ]
+    },
+    {
+      "target": "macos-x64",
+      "tools": [
+        {
+          "name": "yt-dlp",
+          "path": "Tools/macos-x64/yt-dlp/yt-dlp",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp_macos",
+          "version": "2026.03.17",
+          "sha256": "e80c47b3ce712acee51d5e3d4eace2d181b44d38f1942c3a32e3c7ff53cd9ed5",
+          "kind": "file",
+          "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
+        },
+        {
+          "name": "ffmpeg",
+          "path": "Tools/macos-x64/ffmpeg/bin/ffmpeg",
+          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1778768838_8.1.1/ffmpeg.zip",
+          "version": "8.1.1",
+          "sha256": "6a2c2884161d883fbb1ef21a0223475283eb4e381ee870956719f59f32daf74c",
+          "kind": "zip",
+          "archivePathSuffix": "ffmpeg",
+          "licenseNotes": "Static FFmpeg 8.1.1 build for macOS Intel from Martin Riedl's FFmpeg build server."
+        },
+        {
+          "name": "ffprobe",
+          "path": "Tools/macos-x64/ffmpeg/bin/ffprobe",
+          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1778768838_8.1.1/ffprobe.zip",
+          "version": "8.1.1",
+          "sha256": "cb39232c06f663e97917798ed75f7538341367401f9c180f10646193a7a29a54",
+          "kind": "zip",
+          "archivePathSuffix": "ffprobe",
+          "licenseNotes": "Static FFprobe 8.1.1 build for macOS Intel from Martin Riedl's FFmpeg build server."
+        },
+        {
+          "name": "deno",
+          "path": "Tools/macos-x64/deno/deno",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.7.14/deno-x86_64-apple-darwin.zip",
+          "version": "2.7.14",
+          "sha256": "ebdf76dcb4154ac49cb54a6377d91b4b2215a6c40987c21e36eb993b04de6345",
+          "kind": "zip",
+          "archivePathSuffix": "deno",
+          "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
+        }
+      ]
+    },
+    {
+      "target": "macos-arm64",
+      "tools": [
+        {
+          "name": "yt-dlp",
+          "path": "Tools/macos-arm64/yt-dlp/yt-dlp",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp_macos",
+          "version": "2026.03.17",
+          "sha256": "e80c47b3ce712acee51d5e3d4eace2d181b44d38f1942c3a32e3c7ff53cd9ed5",
+          "kind": "file",
+          "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
+        },
+        {
+          "name": "ffmpeg",
+          "path": "Tools/macos-arm64/ffmpeg/bin/ffmpeg",
+          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1778761665_8.1.1/ffmpeg.zip",
+          "version": "8.1.1",
+          "sha256": "ef4fe121377039053b0d7bed4a9aa46e7912918f5ba6424a1dd155f4eed625b0",
+          "kind": "zip",
+          "archivePathSuffix": "ffmpeg",
+          "licenseNotes": "Static FFmpeg 8.1.1 build for macOS Apple Silicon from Martin Riedl's FFmpeg build server."
+        },
+        {
+          "name": "ffprobe",
+          "path": "Tools/macos-arm64/ffmpeg/bin/ffprobe",
+          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1778761665_8.1.1/ffprobe.zip",
+          "version": "8.1.1",
+          "sha256": "3ec76ddd72068162294249465c36257d6c1add564f9b078e31e173837832967d",
+          "kind": "zip",
+          "archivePathSuffix": "ffprobe",
+          "licenseNotes": "Static FFprobe 8.1.1 build for macOS Apple Silicon from Martin Riedl's FFmpeg build server."
+        },
+        {
+          "name": "deno",
+          "path": "Tools/macos-arm64/deno/deno",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.7.14/deno-aarch64-apple-darwin.zip",
+          "version": "2.7.14",
+          "sha256": "523144333a566adc29f17eebdab6526f592dd95ff0f3f63238054dafc3770a26",
+          "kind": "zip",
+          "archivePathSuffix": "deno",
+          "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
+        }
+      ]
     }
   ]
 }

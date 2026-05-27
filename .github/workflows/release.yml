@@ -5,18 +5,44 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to build, for example v0.1.2"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+
 jobs:
-  windows-x64:
-    name: Windows x64 NSIS
-    runs-on: windows-latest
+  build-release:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64 NSIS
+            platform: windows-latest
+            rust-target: ""
+            tauri-args: "--bundles nsis"
+          - name: macOS Intel DMG
+            platform: macos-15-intel
+            rust-target: x86_64-apple-darwin
+            tauri-args: "--target x86_64-apple-darwin --bundles dmg"
+          - name: macOS Apple Silicon DMG
+            platform: macos-15
+            rust-target: aarch64-apple-darwin
+            tauri-args: "--target aarch64-apple-darwin --bundles dmg"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -26,6 +52,10 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        if: ${{ matrix.rust-target != '' }}
+        run: rustup target add ${{ matrix.rust-target }}
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -42,22 +72,25 @@ jobs:
         run: npm run build
 
       - name: Test Rust backend
-        run: cargo test --manifest-path .\src-tauri\Cargo.toml --lib
+        run: cargo test --manifest-path ./src-tauri/Cargo.toml --lib
 
       - name: Check Rust backend
-        run: cargo check --manifest-path .\src-tauri\Cargo.toml
+        run: cargo check --manifest-path ./src-tauri/Cargo.toml
 
       - name: Prepare release notes
         id: release-notes
-        run: node .github/scripts/extract-release-notes.mjs --output release-notes.md
+        run: node .github/scripts/extract-release-notes.mjs --version "${{ env.RELEASE_TAG }}" --output release-notes.md
 
       - name: Build and draft release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: yt-dlp-tauri v__VERSION__
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: yt-dlp-tauri ${{ env.RELEASE_TAG }}
           releaseBody: ${{ steps.release-notes.outputs.release_body }}
           releaseDraft: true
-          prerelease: true
+          prerelease: false
+          uploadUpdaterJson: false
+          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch][setup].[ext]"
+          args: ${{ matrix.tauri-args }}
