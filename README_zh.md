@@ -184,6 +184,16 @@ npm run tauri build
 - [第三方声明](./THIRD-PARTY-NOTICES.md)
 - [工具 manifest](./src-tauri/tools-manifest.json)
 
+## 星标历史
+
+<a href="https://www.star-history.com/?repos=Chlience%2Fyt-dlp-tauri&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <img alt="星标历史图" src="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## 发布前检查
 
 发布 release 前：

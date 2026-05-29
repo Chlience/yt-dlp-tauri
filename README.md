@@ -184,6 +184,16 @@ npm run tauri build
 - [Third-party notices](./THIRD-PARTY-NOTICES.md)
 - [Tool manifest](./src-tauri/tools-manifest.json)
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=Chlience%2Fyt-dlp-tauri&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## Release Checklist
 
 Before publishing a release:
