@@ -61,7 +61,7 @@ Use Windows or macOS for real app builds. WSL can run many checks, but release i
 ### 1. Install prerequisites
 
 - Windows 10/11 with WebView2 Runtime, or macOS
-- Node.js 20+ or 22+
+- Node.js 24+
 - Rust stable with the platform toolchain
 - PowerShell 5+ or PowerShell 7+ on Windows
 

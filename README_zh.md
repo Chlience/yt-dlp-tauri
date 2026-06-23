@@ -61,7 +61,7 @@
 ### 1. 安装系统依赖
 
 - Windows 10/11 + WebView2 Runtime，或 macOS
-- Node.js 20+ 或 22+
+- Node.js 24+
 - Rust stable，安装对应平台 toolchain
 - Windows 上需要 PowerShell 5+ 或 PowerShell 7+
 
