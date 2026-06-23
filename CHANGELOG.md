@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.1.7 - 2026-06-23
+
 ### 中文
 
 - 工具安装改用应用内 Rust HTTP 下载，并根据 `Content-Length` 与已下载字节显示真实下载进度。

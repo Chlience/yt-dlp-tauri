@@ -5329,7 +5329,7 @@ dependencies = [
 
 [[package]]
 name = "yt-dlp-tauri"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "reqwest",
  "rustls",
