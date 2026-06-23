@@ -7,10 +7,14 @@ All notable changes to this project will be documented in this file.
 ### 中文
 
 - 工具安装改用应用内 Rust HTTP 下载，并根据 `Content-Length` 与已下载字节显示真实下载进度。
+- 将 Windows `ffmpeg`/`ffprobe` 更新到可下载的固定上游构建，修复旧 release asset 返回 404 导致安装失败。
+- 新增工具 manifest 下载 URL 健康检查，定时发现上游 asset 失效。
 
 ### English
 
 - Replaced tool installation downloads with in-app Rust HTTP streaming and real progress from `Content-Length` plus downloaded bytes.
+- Updated Windows `ffmpeg`/`ffprobe` to a downloadable pinned upstream build, fixing install failures from the old release asset returning 404.
+- Added a tool manifest source URL health check so scheduled checks catch unavailable upstream assets.
 
 ## 0.1.6 - 2026-06-23
 

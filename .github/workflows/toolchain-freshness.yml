@@ -23,3 +23,6 @@ jobs:
 
       - name: Check latest yt-dlp release
         run: node scripts/check-yt-dlp-release.mjs
+
+      - name: Check tool source URLs
+        run: node scripts/check-tool-source-urls.mjs

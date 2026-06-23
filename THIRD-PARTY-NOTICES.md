@@ -6,7 +6,7 @@
 
 - Bundled file: `src-tauri/Tools/win-x64/yt-dlp/yt-dlp.exe`
 - Source: <https://github.com/yt-dlp/yt-dlp>
-- Release URL tracked by this project: <https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp.exe>
+- Release URL tracked by this project: <https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe>
 - Notice: yt-dlp itself is Unlicense, but the official PyInstaller executable includes GPLv3+ licensed code and should be treated as GPLv3+ for redistribution.
 
 ## FFmpeg / ffprobe
@@ -15,7 +15,7 @@
   - `src-tauri/Tools/win-x64/ffmpeg/bin/ffmpeg.exe`
   - `src-tauri/Tools/win-x64/ffmpeg/bin/ffprobe.exe`
 - Source used by this project: <https://github.com/yt-dlp/FFmpeg-Builds>
-- Release URL tracked by this project: <https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-05-25-16-31/ffmpeg-N-124634-g69bdb05f36-win64-gpl.zip>
+- Release URL tracked by this project: <https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-22-18-32/ffmpeg-N-125157-gefa8b20987-win64-gpl.zip>
 - Notice: the selected FFmpeg build is the win64 GPL build. Keep the relevant GPL notices and source availability obligations when redistributing.
 
 ## Deno
