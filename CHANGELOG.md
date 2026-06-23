@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 中文
+
+- 将应用管理的 `yt-dlp` 更新到 `2026.06.09`，减少站点 extractor 过期导致的解析失败。
+- 视频信息解析失败时优先显示 `yt-dlp` 的 `ERROR:` 行，避免版本过期警告遮挡真正错误。
+- 新增定时检查上游 `yt-dlp` release 的 GitHub Actions workflow。
+
+### English
+
+- Updated the app-managed `yt-dlp` to `2026.06.09` to reduce metadata failures from stale site extractors.
+- Preferred `yt-dlp` `ERROR:` lines when metadata parsing fails so version-age warnings do not hide the real error.
+- Added a scheduled GitHub Actions workflow that checks the pinned manifest against the latest upstream `yt-dlp` release.
+
 ## 0.1.5 - 2026-05-27
 
 ### 中文

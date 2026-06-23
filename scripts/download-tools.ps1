@@ -25,8 +25,8 @@ function Download-File([string] $Url, [string] $Destination) {
 }
 
 $ytDlp = Join-Path $ToolsRoot 'yt-dlp\yt-dlp.exe'
-Download-File 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp.exe' $ytDlp
-Assert-Hash $ytDlp '3db811b366b2da47337d2fcfdfe5bbd9a258dad3f350c54974f005df115a1545'
+Download-File 'https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe' $ytDlp
+Assert-Hash $ytDlp '3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27'
 
 $ffmpegZip = Join-Path $TempRoot 'ffmpeg-N-124634-g69bdb05f36-win64-gpl.zip'
 Download-File 'https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-05-25-16-31/ffmpeg-N-124634-g69bdb05f36-win64-gpl.zip' $ffmpegZip

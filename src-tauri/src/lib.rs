@@ -1845,6 +1845,23 @@ fn first_line(bytes: &[u8]) -> Option<String> {
         .map(|line| line.trim().to_string())
 }
 
+fn first_matching_line(bytes: &[u8], predicate: impl Fn(&str) -> bool) -> Option<String> {
+    String::from_utf8_lossy(bytes)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && predicate(line))
+        .map(ToOwned::to_owned)
+}
+
+fn process_detail_line(stderr: &[u8], stdout: &[u8]) -> Option<String> {
+    first_matching_line(stderr, |line| line.starts_with("ERROR:"))
+        .or_else(|| first_matching_line(stdout, |line| line.starts_with("ERROR:")))
+        .or_else(|| first_matching_line(stderr, |line| !line.starts_with("WARNING:")))
+        .or_else(|| first_matching_line(stdout, |line| !line.starts_with("WARNING:")))
+        .or_else(|| first_line(stderr))
+        .or_else(|| first_line(stdout))
+}
+
 fn process_failure_message(
     action: &str,
     code: Option<i32>,
@@ -1855,7 +1872,7 @@ fn process_failure_message(
         Some(code) => format!("Exit code {code}."),
         None => "Process terminated without an exit code.".to_string(),
     };
-    let details = first_line(stderr).or_else(|| first_line(stdout));
+    let details = process_detail_line(stderr, stdout);
 
     match details {
         Some(details) => format!("{action} {status} {details}"),
@@ -2090,6 +2107,21 @@ mod tests {
         assert_eq!(
             message,
             "Failed to download yt-dlp. Exit code 22. curl: (22) The requested URL returned error: 404"
+        );
+    }
+
+    #[test]
+    fn process_failure_message_prefers_error_lines_over_warnings() {
+        let message = process_failure_message(
+            "Failed to parse video metadata.",
+            Some(1),
+            b"WARNING: Your yt-dlp version (2026.03.17) is older than 90 days!\nERROR: [youtube] abc123: Sign in to confirm you are not a bot\n",
+            b"",
+        );
+
+        assert_eq!(
+            message,
+            "Failed to parse video metadata. Exit code 1. ERROR: [youtube] abc123: Sign in to confirm you are not a bot"
         );
     }
 
