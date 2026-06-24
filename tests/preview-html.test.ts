@@ -17,3 +17,20 @@ test("cookie controls are available beside the URL workflow", () => {
   assert.match(urlPanel, /\bid="choose-cookies"/);
   assert.match(urlPanel, /\bid="clear-cookies"/);
 });
+
+test("release notes dialog is available from Settings", () => {
+  const html = readFileSync("index.html", "utf8");
+
+  assert.match(html, /\bid="release-notes-button"/);
+  assert.match(html, /\bid="release-notes-backdrop"/);
+  assert.match(html, /\bid="release-notes-dialog"/);
+  assert.match(html, /\bid="release-notes-list"/);
+});
+
+test("status messages render in a toast region", () => {
+  const html = readFileSync("index.html", "utf8");
+
+  assert.match(html, /\bid="toast-region"/);
+  assert.match(html, /\baria-live="polite"/);
+  assert.doesNotMatch(html, /\bid="notice"/);
+});

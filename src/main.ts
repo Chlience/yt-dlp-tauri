@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import changelogMarkdown from "../CHANGELOG.md?raw";
 import packageInfo from "../package.json";
+import { releaseNotesForVersion, shouldShowReleaseNotes, stripTerminalSentencePunctuation } from "./release-notes";
 import { thumbnailUrlCandidates } from "./thumbnail";
 import { findToolManifestAsset, summarizeTools, type ToolAction, type ToolStatus, type ToolSummaryMode } from "./toolchain";
 import { type GithubAccessMode, getUpdateStatus, parseGithubHttpError, parseLatestRelease, resolveGithubUrl } from "./update-check";
@@ -51,15 +53,25 @@ const PROJECT_REPOSITORY_URL = "https://github.com/Chlience/yt-dlp-tauri";
 const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY_URL}/releases`;
 const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
 const GITHUB_ACCESS_STORAGE_KEY = "yt-dlp-tauri-github-access-mode";
+const RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY = "yt-dlp-tauri-release-notes-seen-version";
+const MAX_TOASTS = 4;
+const TOAST_AUTO_DISMISS_MS: Record<NoticeTone, number> = {
+  success: 6000,
+  warning: 8000,
+  error: 0,
+};
 
 const translations = {
   en: {
     "app.title": "yt-dlp-tauri",
     "app.eyebrow": "Desktop downloader",
     "app.heading": "Paste, choose, download.",
+    "notifications.label": "Notifications",
     "language.label": "Language",
     "action.settings": "Settings",
     "action.close": "Close",
+    "action.done": "Done",
+    "action.dismissNotification": "Dismiss notification",
     "action.parse": "Parse",
     "action.download": "Download",
     "action.cancel": "Cancel",
@@ -76,6 +88,7 @@ const translations = {
     "action.reinstallTools": "Reinstall tools",
     "action.checkUpdates": "Check updates",
     "action.openRelease": "Open release",
+    "action.releaseNotes": "Release notes",
     "action.projectHome": "Project home",
     "github.accessLabel": "GitHub access mode",
     "github.direct": "Direct",
@@ -131,6 +144,10 @@ const translations = {
     "updates.failed": "Could not check updates: {message}",
     "updates.rateLimited": "GitHub API rate limit reached. Try again after {time}, or switch GitHub access mode.",
     "updates.later": "later",
+    "releaseNotes.kicker": "Updated",
+    "releaseNotes.title": "What's new",
+    "releaseNotes.version": "Version {version}",
+    "releaseNotes.empty": "No release notes found for this version.",
     "settings.kicker": "Preferences",
     "settings.title": "Settings",
     "settings.outputFolder": "Output folder",
@@ -187,9 +204,12 @@ const translations = {
     "app.title": "yt-dlp-tauri",
     "app.eyebrow": "桌面下载器",
     "app.heading": "粘贴，选择，下载。",
+    "notifications.label": "通知",
     "language.label": "语言",
     "action.settings": "设置",
     "action.close": "关闭",
+    "action.done": "完成",
+    "action.dismissNotification": "关闭通知",
     "action.parse": "解析",
     "action.download": "下载",
     "action.cancel": "取消",
@@ -206,6 +226,7 @@ const translations = {
     "action.reinstallTools": "重新安装工具",
     "action.checkUpdates": "检查更新",
     "action.openRelease": "打开发布页",
+    "action.releaseNotes": "更新说明",
     "action.projectHome": "项目主页",
     "github.accessLabel": "GitHub 访问方式",
     "github.direct": "直连",
@@ -261,6 +282,10 @@ const translations = {
     "updates.failed": "检查更新失败：{message}",
     "updates.rateLimited": "GitHub API 访问额度已用尽。请在 {time} 后重试，或切换 GitHub 访问方式。",
     "updates.later": "稍后",
+    "releaseNotes.kicker": "已更新",
+    "releaseNotes.title": "更新说明",
+    "releaseNotes.version": "版本 {version}",
+    "releaseNotes.empty": "当前版本没有更新说明。",
     "settings.kicker": "偏好",
     "settings.title": "设置",
     "settings.outputFolder": "输出目录",
@@ -336,9 +361,13 @@ const state = {
   githubAccessMode: resolveInitialGithubAccessMode(),
   cookiesFile: null as string | null,
   language: resolveInitialLanguage(),
+  releaseNotesOpen: false,
   thumbnailCandidates: [] as string[],
   thumbnailCandidateIndex: 0,
 };
+
+let releaseNotesReturnFocus: HTMLElement | null = null;
+const toastTimers = new Map<HTMLElement, number>();
 
 const elements = {
   url: must<HTMLInputElement>("#url"),
@@ -363,9 +392,16 @@ const elements = {
   saveFolder: must<HTMLButtonElement>("#save-folder"),
   checkUpdates: must<HTMLButtonElement>("#check-updates"),
   releaseLink: must<HTMLButtonElement>("#release-link"),
+  releaseNotesButton: must<HTMLButtonElement>("#release-notes-button"),
   githubLink: must<HTMLButtonElement>("#github-link"),
   githubDirect: must<HTMLButtonElement>("#github-direct"),
   githubProxy: must<HTMLButtonElement>("#github-proxy"),
+  releaseNotesBackdrop: must<HTMLElement>("#release-notes-backdrop"),
+  releaseNotesDialog: must<HTMLElement>("#release-notes-dialog"),
+  releaseNotesClose: must<HTMLButtonElement>("#release-notes-close"),
+  releaseNotesDone: must<HTMLButtonElement>("#release-notes-done"),
+  releaseNotesVersion: must<HTMLElement>("#release-notes-version"),
+  releaseNotesList: must<HTMLElement>("#release-notes-list"),
   appVersion: must<HTMLElement>("#app-version"),
   updateStatus: must<HTMLElement>("#update-status"),
   folderInput: must<HTMLInputElement>("#folder-input"),
@@ -383,7 +419,7 @@ const elements = {
   progress: must<HTMLProgressElement>("#progress"),
   progressText: must<HTMLElement>("#progress-text"),
   events: must<HTMLElement>("#events"),
-  notice: must<HTMLElement>("#notice"),
+  toastRegion: must<HTMLElement>("#toast-region"),
 };
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -419,7 +455,7 @@ function t(key: TranslationKey, values: Record<string, string | number> = {}) {
   for (const [name, value] of Object.entries(values)) {
     text = text.split(`{${name}}`).join(String(value));
   }
-  return text;
+  return stripTerminalSentencePunctuation(text);
 }
 
 function applyTranslations() {
@@ -465,6 +501,9 @@ function applyTranslations() {
   renderCookiesFile(state.cookiesFile);
   updateGithubAccessButtons();
   updateToolActionButton();
+  if (state.releaseNotesOpen) {
+    renderReleaseNotes();
+  }
 }
 
 function setLanguage(language: Language) {
@@ -497,6 +536,59 @@ function setSettingsOpen(isOpen: boolean) {
   }
 }
 
+function maybeShowReleaseNotesAfterUpdate() {
+  const seenVersion = localStorage.getItem(RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY);
+  if (!seenVersion) {
+    localStorage.setItem(RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY, APP_VERSION);
+    return;
+  }
+
+  if (shouldShowReleaseNotes(seenVersion, APP_VERSION)) {
+    showReleaseNotes();
+  }
+}
+
+function showReleaseNotes() {
+  releaseNotesReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  renderReleaseNotes();
+  setReleaseNotesOpen(true);
+}
+
+function closeReleaseNotes() {
+  localStorage.setItem(RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY, APP_VERSION);
+  setReleaseNotesOpen(false);
+}
+
+function setReleaseNotesOpen(isOpen: boolean) {
+  state.releaseNotesOpen = isOpen;
+  elements.releaseNotesDialog.hidden = !isOpen;
+  elements.releaseNotesBackdrop.hidden = !isOpen;
+  elements.releaseNotesDialog.setAttribute("aria-hidden", String(!isOpen));
+  document.body.classList.toggle("modal-open", isOpen);
+
+  if (isOpen) {
+    elements.releaseNotesClose.focus();
+    return;
+  }
+
+  releaseNotesReturnFocus?.focus();
+  releaseNotesReturnFocus = null;
+}
+
+function renderReleaseNotes() {
+  const notes = releaseNotesForVersion(changelogMarkdown, APP_VERSION, state.language);
+  const items = notes?.items.length ? notes.items : [t("releaseNotes.empty")];
+
+  elements.releaseNotesVersion.textContent = t("releaseNotes.version", { version: `v${APP_VERSION}` });
+  elements.releaseNotesList.replaceChildren(
+    ...items.map((item) => {
+      const row = document.createElement("li");
+      row.textContent = stripTerminalSentencePunctuation(item);
+      return row;
+    }),
+  );
+}
+
 function bindEvents() {
   elements.parse.addEventListener("click", () => void parseCurrentUrl());
   elements.download.addEventListener("click", () => void downloadCurrentVideo());
@@ -518,11 +610,15 @@ function bindEvents() {
   elements.resetFolder.addEventListener("click", () => void resetDownloadFolder());
   elements.checkUpdates.addEventListener("click", () => void checkForUpdates());
   elements.releaseLink.addEventListener("click", () => void openLatestRelease());
+  elements.releaseNotesButton.addEventListener("click", () => showReleaseNotes());
   elements.githubLink.addEventListener("click", () => void openProjectRepository());
   elements.githubDirect.addEventListener("click", () => setGithubAccessMode("direct"));
   elements.githubProxy.addEventListener("click", () => setGithubAccessMode("gh-proxy"));
   elements.thumbnail.addEventListener("load", () => showLoadedThumbnail());
   elements.thumbnail.addEventListener("error", () => loadNextThumbnailCandidate());
+  elements.releaseNotesClose.addEventListener("click", () => closeReleaseNotes());
+  elements.releaseNotesDone.addEventListener("click", () => closeReleaseNotes());
+  elements.releaseNotesBackdrop.addEventListener("click", () => closeReleaseNotes());
   elements.quality.addEventListener("change", () => {
     state.selectedFormat = state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
     updateButtons();
@@ -540,19 +636,34 @@ function bindEvents() {
     }
   });
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !elements.settingsDrawer.hidden) {
+    if (event.key !== "Escape") {
+      return;
+    }
+
+    if (state.releaseNotesOpen) {
+      closeReleaseNotes();
+      return;
+    }
+
+    if (!elements.settingsDrawer.hidden) {
       setSettingsOpen(false);
+      return;
+    }
+
+    const latestToast = elements.toastRegion.firstElementChild;
+    if (latestToast instanceof HTMLElement) {
+      dismissToast(latestToast);
     }
   });
 }
 
 async function bootstrap() {
-  showNotice(t("notice.checkingTools"), "warning");
   elements.progressText.textContent = t("progress.idle");
   renderEmptyPreview(t("preview.emptyStart"));
   logEvent(t("event.booted"));
   await loadAppState();
-  await verifyTools();
+  maybeShowReleaseNotesAfterUpdate();
+  await verifyTools({ quietReady: true });
 }
 
 async function loadAppState() {
@@ -563,13 +674,13 @@ async function loadAppState() {
   renderCookiesFile(appState.cookies_file ?? null);
 }
 
-async function verifyTools() {
+async function verifyTools(options: { quietReady?: boolean } = {}) {
   setBusy(true, undefined, "tools");
   state.pendingToolManifestJson = null;
   elements.toolInstallStatus.textContent = t("settings.toolsChecking");
   try {
     const tools = await invoke<ToolStatus[]>("check_tools");
-    applyToolSummary(tools, "local");
+    applyToolSummary(tools, "local", options);
   } catch (error) {
     state.toolsReady = false;
     state.toolAction = "install";
@@ -1069,14 +1180,16 @@ function renderTools(tools: ToolStatus[]) {
   );
 }
 
-function applyToolSummary(tools: ToolStatus[], mode: ToolSummaryMode) {
+function applyToolSummary(tools: ToolStatus[], mode: ToolSummaryMode, options: { quietReady?: boolean } = {}) {
   const summary = summarizeTools(tools, mode);
   state.toolsReady = summary.ready;
   state.toolAction = summary.action;
   renderTools(tools);
   updateToolActionButton();
   elements.toolInstallStatus.textContent = t(summary.settingsKey);
-  showNotice(t(summary.noticeKey), summary.tone);
+  if (!(options.quietReady && summary.ready)) {
+    showNotice(t(summary.noticeKey), summary.tone);
+  }
   logEvent(t(summary.eventKey));
   return summary;
 }
@@ -1191,8 +1304,88 @@ function updateButtons() {
 }
 
 function showNotice(message: string, tone: NoticeTone) {
-  elements.notice.textContent = message;
-  elements.notice.className = `notice is-${tone}`;
+  const text = stripTerminalSentencePunctuation(message.trim());
+  if (!text) {
+    return;
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `toast is-${tone}`;
+  toast.setAttribute("role", tone === "error" ? "alert" : "status");
+
+  const indicator = document.createElement("span");
+  indicator.className = "toast-indicator";
+  indicator.setAttribute("aria-hidden", "true");
+
+  const copy = document.createElement("p");
+  copy.className = "toast-copy";
+  copy.textContent = text;
+
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.type = "button";
+  close.textContent = "×";
+  close.setAttribute("aria-label", t("action.dismissNotification"));
+  close.addEventListener("click", () => dismissToast(toast));
+
+  toast.addEventListener("pointerenter", () => clearToastTimer(toast));
+  toast.addEventListener("pointerleave", () => maybeResumeToastTimer(toast, tone));
+  toast.addEventListener("focusin", () => clearToastTimer(toast));
+  toast.addEventListener("focusout", () => maybeResumeToastTimer(toast, tone));
+
+  toast.append(indicator, copy, close);
+  elements.toastRegion.prepend(toast);
+  trimToastStack();
+  scheduleToastDismiss(toast, tone);
+}
+
+function scheduleToastDismiss(toast: HTMLElement, tone: NoticeTone) {
+  clearToastTimer(toast);
+  const duration = TOAST_AUTO_DISMISS_MS[tone];
+  if (duration <= 0) {
+    return;
+  }
+
+  toastTimers.set(
+    toast,
+    window.setTimeout(() => dismissToast(toast), duration),
+  );
+}
+
+function maybeResumeToastTimer(toast: HTMLElement, tone: NoticeTone) {
+  if (toast.matches(":hover") || toast.contains(document.activeElement)) {
+    return;
+  }
+  scheduleToastDismiss(toast, tone);
+}
+
+function clearToastTimer(toast: HTMLElement) {
+  const timer = toastTimers.get(toast);
+  if (timer) {
+    window.clearTimeout(timer);
+    toastTimers.delete(toast);
+  }
+}
+
+function dismissToast(toast: HTMLElement) {
+  if (!toast.isConnected || toast.classList.contains("is-leaving")) {
+    return;
+  }
+
+  clearToastTimer(toast);
+  toast.classList.add("is-leaving");
+  window.setTimeout(() => toast.remove(), 180);
+}
+
+function trimToastStack() {
+  while (elements.toastRegion.children.length > MAX_TOASTS) {
+    const oldestToast = elements.toastRegion.lastElementChild;
+    if (!(oldestToast instanceof HTMLElement)) {
+      return;
+    }
+    clearToastTimer(oldestToast);
+    oldestToast.remove();
+  }
 }
 
 function renderUpdateStatus(message: string, tone: UpdateTone) {

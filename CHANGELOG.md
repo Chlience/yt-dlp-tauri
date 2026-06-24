@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 中文
+
+- 更新后首次启动会弹出当前版本的更新说明，Settings 中也可手动打开更新说明。
+- UI 翻译文案会自动去掉句末句号，避免显示“下载完成。”这类提示。
+- 顶部状态提示改为右上角 toast 通知，成功和警告会自动收起，错误会保留到手动关闭。
+
+### English
+
+- Added a post-update release notes dialog for the current version, with a manual Release notes entry in Settings.
+- UI translation copy now removes sentence-ending full stops so prompts such as "Download completed." render without the final period.
+- Replaced the inline top status panel with top-right toast notifications; success and warning toasts auto-dismiss while errors stay until dismissed.
+
 ## 0.1.9 - 2026-06-24
 
 ### 中文
