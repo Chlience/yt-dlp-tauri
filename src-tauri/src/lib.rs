@@ -108,6 +108,7 @@ struct ToolNames {
 #[serde(rename_all = "camelCase")]
 struct ToolsManifest {
     schema_version: u32,
+    retrieved_at_utc: Option<String>,
     targets: Vec<ManifestTarget>,
 }
 
@@ -277,34 +278,58 @@ async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
 }
 
 #[tauri::command]
+async fn check_tools_with_manifest(
+    app: AppHandle,
+    manifest_json: String,
+) -> Result<Vec<ToolStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_name = current_tool_target()?;
+        let target = manifest_target_from_json(&manifest_json, &target_name)?;
+        probe_manifest_tools(&app, &target)
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
 async fn install_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let target_name = current_tool_target()?;
         let target = read_manifest_target(&app, &target_name)?;
+        install_manifest_tools(&app, &target_name, &target, None)
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn install_tools_from_manifest(
+    app: AppHandle,
+    manifest_json: String,
+) -> Result<Vec<ToolStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_name = current_tool_target()?;
+        let target = manifest_target_from_json(&manifest_json, &target_name)?;
+        install_manifest_tools(&app, &target_name, &target, Some(&manifest_json))
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn reinstall_tools(
+    app: AppHandle,
+    manifest_json: Option<String>,
+) -> Result<Vec<ToolStatus>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let target_name = current_tool_target()?;
+        let target = match manifest_json.as_deref() {
+            Some(json) => manifest_target_from_json(json, &target_name)?,
+            None => read_manifest_target(&app, &target_name)?,
+        };
         let root = writable_tools_root(&target_name)?;
-        fs::create_dir_all(&root).map_err(to_string)?;
-
-        emit_tool_install_progress(
-            &app,
-            ToolInstallProgress {
-                percent: Some(0.0),
-                status: format!("Installing toolchain for {target_name}"),
-                tool: None,
-            },
-        );
-
-        install_manifest_target(&app, &target, &root)?;
-
-        emit_tool_install_progress(
-            &app,
-            ToolInstallProgress {
-                percent: Some(100.0),
-                status: "Toolchain installed.".to_string(),
-                tool: None,
-            },
-        );
-
-        probe_manifest_tools(&app, &target)
+        remove_managed_toolchain(&root)?;
+        install_manifest_tools(&app, &target_name, &target, manifest_json.as_deref())
     })
     .await
     .map_err(join_error)?
@@ -635,17 +660,27 @@ fn writable_tools_root(target: &str) -> Result<PathBuf, String> {
 }
 
 fn read_manifest_target(app: &AppHandle, target: &str) -> Result<ManifestTarget, String> {
-    let manifest_path = manifest_path(app)?;
-    let json = fs::read_to_string(&manifest_path).map_err(to_string)?;
-    manifest_target_from_json(&json, target)
+    let manifest = read_current_manifest(app)?;
+    manifest_target_from_manifest(manifest, target)
 }
 
 fn manifest_target_from_json(json: &str, target: &str) -> Result<ManifestTarget, String> {
+    let manifest = manifest_from_json(json)?;
+    manifest_target_from_manifest(manifest, target)
+}
+
+fn manifest_from_json(json: &str) -> Result<ToolsManifest, String> {
     let manifest: ToolsManifest = serde_json::from_str(json).map_err(to_string)?;
     if manifest.schema_version < 2 {
         return Err("tools-manifest.json schemaVersion must be 2 or newer.".to_string());
     }
+    Ok(manifest)
+}
 
+fn manifest_target_from_manifest(
+    manifest: ToolsManifest,
+    target: &str,
+) -> Result<ManifestTarget, String> {
     manifest
         .targets
         .into_iter()
@@ -653,7 +688,55 @@ fn manifest_target_from_json(json: &str, target: &str) -> Result<ManifestTarget,
         .ok_or_else(|| format!("No tool manifest target found for {target}."))
 }
 
-fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn read_current_manifest(app: &AppHandle) -> Result<ToolsManifest, String> {
+    let bundled_path = bundled_manifest_path(app)?;
+    let bundled_manifest = read_manifest_file(&bundled_path)?;
+    let active_manifest = active_tools_manifest_path()
+        .ok()
+        .filter(|path| path.exists())
+        .map(|path| read_manifest_file(&path))
+        .transpose()?;
+
+    Ok(select_preferred_manifest(&bundled_manifest, active_manifest.as_ref()).clone())
+}
+
+fn read_manifest_file(path: &Path) -> Result<ToolsManifest, String> {
+    let json = fs::read_to_string(path).map_err(to_string)?;
+    manifest_from_json(&json)
+}
+
+fn select_preferred_manifest<'a>(
+    bundled: &'a ToolsManifest,
+    active: Option<&'a ToolsManifest>,
+) -> &'a ToolsManifest {
+    match active {
+        Some(active) if manifest_freshness_key(active) > manifest_freshness_key(bundled) => active,
+        _ => bundled,
+    }
+}
+
+fn manifest_freshness_key(manifest: &ToolsManifest) -> &str {
+    manifest.retrieved_at_utc.as_deref().unwrap_or("")
+}
+
+fn save_active_tools_manifest(json: &str) -> Result<(), String> {
+    let _ = manifest_from_json(json)?;
+    let path = active_tools_manifest_path()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(to_string)?;
+    }
+    fs::write(path, json).map_err(to_string)
+}
+
+fn active_tools_manifest_path() -> Result<PathBuf, String> {
+    Ok(active_tools_manifest_path_for(&app_data_root()?))
+}
+
+fn active_tools_manifest_path_for(root: &Path) -> PathBuf {
+    root.join(TOOLS_MANIFEST_FILE)
+}
+
+fn bundled_manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(resource_dir) = app.path().resource_dir() {
         candidates.push(resource_dir.join(TOOLS_MANIFEST_FILE));
@@ -676,6 +759,65 @@ fn manifest_path(app: &AppHandle) -> Result<PathBuf, String> {
         .into_iter()
         .find(|path| path.exists())
         .ok_or_else(|| "Unable to locate tools-manifest.json.".to_string())
+}
+
+fn install_manifest_tools(
+    app: &AppHandle,
+    target_name: &str,
+    target: &ManifestTarget,
+    active_manifest_json: Option<&str>,
+) -> Result<Vec<ToolStatus>, String> {
+    let root = writable_tools_root(target_name)?;
+    fs::create_dir_all(&root).map_err(to_string)?;
+
+    emit_tool_install_progress(
+        app,
+        ToolInstallProgress {
+            percent: Some(0.0),
+            status: format!("Installing toolchain for {target_name}"),
+            tool: None,
+        },
+    );
+
+    install_manifest_target(app, target, &root)?;
+
+    if let Some(json) = active_manifest_json {
+        save_active_tools_manifest(json)?;
+    }
+
+    emit_tool_install_progress(
+        app,
+        ToolInstallProgress {
+            percent: Some(100.0),
+            status: "Toolchain installed.".to_string(),
+            tool: None,
+        },
+    );
+
+    probe_manifest_tools(app, target)
+}
+
+fn remove_managed_toolchain(root: &Path) -> Result<(), String> {
+    if root.exists() {
+        fs::remove_dir_all(root).map_err(|error| {
+            format!(
+                "Failed to remove managed tools at {}: {error}",
+                root.display()
+            )
+        })?;
+    }
+
+    let temp_root = app_data_root()?.join("tool-downloads");
+    if temp_root.exists() {
+        fs::remove_dir_all(&temp_root).map_err(|error| {
+            format!(
+                "Failed to remove temporary tool downloads at {}: {error}",
+                temp_root.display()
+            )
+        })?;
+    }
+
+    Ok(())
 }
 
 fn install_manifest_target(
@@ -2140,6 +2282,48 @@ mod tests {
     }
 
     #[test]
+    fn prefers_newer_active_manifest_over_bundled_manifest() {
+        let bundled = ToolsManifest {
+            schema_version: 2,
+            retrieved_at_utc: Some("2026-06-01T00:00:00Z".to_string()),
+            targets: Vec::new(),
+        };
+        let active = ToolsManifest {
+            schema_version: 2,
+            retrieved_at_utc: Some("2026-06-23T00:00:00Z".to_string()),
+            targets: Vec::new(),
+        };
+
+        let selected = select_preferred_manifest(&bundled, Some(&active));
+
+        assert_eq!(
+            selected.retrieved_at_utc.as_deref(),
+            Some("2026-06-23T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn keeps_newer_bundled_manifest_over_stale_active_manifest() {
+        let bundled = ToolsManifest {
+            schema_version: 2,
+            retrieved_at_utc: Some("2026-06-23T00:00:00Z".to_string()),
+            targets: Vec::new(),
+        };
+        let active = ToolsManifest {
+            schema_version: 2,
+            retrieved_at_utc: Some("2026-06-01T00:00:00Z".to_string()),
+            targets: Vec::new(),
+        };
+
+        let selected = select_preferred_manifest(&bundled, Some(&active));
+
+        assert_eq!(
+            selected.retrieved_at_utc.as_deref(),
+            Some("2026-06-23T00:00:00Z")
+        );
+    }
+
+    #[test]
     fn maps_downloaded_bytes_to_current_file_percent() {
         assert_eq!(download_progress_percent(25, Some(100)), Some(25.0));
         assert_eq!(download_progress_percent(100, Some(100)), Some(100.0));
@@ -2329,7 +2513,10 @@ pub fn run() {
             clear_cookies_file,
             open_download_directory,
             check_tools,
+            check_tools_with_manifest,
             install_tools,
+            install_tools_from_manifest,
+            reinstall_tools,
             parse_metadata,
             download_video,
             cancel_download

@@ -37,7 +37,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Parse video metadata through `yt-dlp` and preview title, thumbnail, duration, source URL, description, and quality options.
 - Download with live progress, speed, ETA, cancellation, and a saved output folder.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
-- Install, repair, and verify the app-managed platform toolchain from Settings.
+- Install, update, reinstall, and verify the app-managed platform toolchain from Settings.
 - Verify tools against fixed source URLs and SHA-256 hashes from a pinned manifest.
 - Switch the UI between English and Chinese.
 - Check GitHub Releases for app updates, with optional `gh-proxy` routing for update and release access.
@@ -200,7 +200,7 @@ Before publishing a release:
 
 1. Run the verification commands above.
 2. Push a version tag such as `v0.1.3`.
-3. Wait for the `Release` workflow to upload Windows NSIS and macOS DMG artifacts to the draft GitHub Release.
+3. Wait for the `Release` workflow to upload Windows NSIS, macOS DMG, and `tools-manifest.json` artifacts to the draft GitHub Release.
 4. Confirm `src-tauri/tools-manifest.json` uses fixed release URLs, not `latest`.
 5. Confirm generated folders and restored tools are not staged.
 6. Include the GPL license and third-party notices with the release.

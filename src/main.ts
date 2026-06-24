@@ -4,17 +4,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import packageInfo from "../package.json";
 import { thumbnailUrlCandidates } from "./thumbnail";
+import { findToolManifestAsset, summarizeTools, type ToolAction, type ToolStatus, type ToolSummaryMode } from "./toolchain";
 import { type GithubAccessMode, getUpdateStatus, parseGithubHttpError, parseLatestRelease, resolveGithubUrl } from "./update-check";
-
-type ToolStatus = {
-  name: string;
-  relative_path: string;
-  full_path: string;
-  availability: "available" | "missing" | "cannot_execute" | "outdated";
-  version?: string;
-  expected_version?: string;
-  error?: string;
-};
 
 type VideoFormatOption = {
   label: string;
@@ -78,10 +69,11 @@ const translations = {
     "action.reset": "Reset",
     "action.chooseCookies": "Choose Cookie file",
     "action.clearCookies": "Clear",
-    "action.refresh": "Refresh",
+    "action.verifyTools": "Verify tools",
+    "action.checkToolUpdates": "Check tool updates",
     "action.installTools": "Install tools",
     "action.updateTools": "Update tools",
-    "action.repairTools": "Repair tools",
+    "action.reinstallTools": "Reinstall tools",
     "action.checkUpdates": "Check updates",
     "action.openRelease": "Open release",
     "action.projectHome": "Project home",
@@ -119,6 +111,7 @@ const translations = {
     "notice.toolchainReady": "Toolchain ready.",
     "notice.toolsMissing": "Some tools are missing.",
     "notice.toolsOutdated": "Toolchain update available.",
+    "notice.toolsDamaged": "Toolchain needs reinstall.",
     "notice.toolCheckFailed": "Tool check failed.",
     "notice.toolsInstalled": "Toolchain installed.",
     "notice.toolInstallNeedsAttention": "Tool install needs attention.",
@@ -148,12 +141,19 @@ const translations = {
     "settings.installMissing": "Install missing tools automatically.",
     "settings.installingTools": "Installing missing tools...",
     "settings.updatingTools": "Updating tools to pinned versions...",
-    "settings.repairingTools": "Repairing toolchain...",
+    "settings.reinstallingTools": "Reinstalling managed tools...",
     "settings.toolsPathPending": "Tools path not resolved yet",
     "settings.toolsChecking": "Checking tools...",
     "settings.toolsAvailable": "All required tools are available.",
     "settings.toolsMissing": "Missing tools can be installed automatically.",
-    "settings.toolsOutdated": "Some tools need an update or repair.",
+    "settings.toolsDamaged": "Some tools are missing, damaged, or do not match the active manifest.",
+    "settings.toolUpdatesChecking": "Checking the latest released tool manifest...",
+    "settings.toolUpdatesAvailable": "A released toolchain update is available.",
+    "settings.toolUpdatesCurrent": "Tools match the latest released manifest.",
+    "settings.toolUpdatesNoManifest": "The latest release does not include a tool manifest yet.",
+    "settings.toolUpdatesInvalidManifest": "The released tool manifest could not be read.",
+    "settings.toolUpdatesFailed": "Tool update check failed: {message}",
+    "settings.reinstallConfirm": "Reinstall managed tools at {path}? This removes the tool directory and temporary tool downloads, then downloads verified tools again.",
     "settings.toolCheckFailed": "Tool check failed.",
     "settings.toolsInstalled": "Toolchain installed.",
     "settings.toolsInstallPartial": "Install finished, but some tools still need attention.",
@@ -167,7 +167,9 @@ const translations = {
     "event.booted": "App booted.",
     "event.toolsAvailable": "yt-dlp, ffmpeg, ffprobe and deno are available.",
     "event.toolsMissing": "Tool check found missing tools.",
-    "event.toolsOutdated": "Tool check found tools that need an update or repair.",
+    "event.toolsDamaged": "Tool check found tools that need reinstall.",
+    "event.toolUpdatesAvailable": "Released toolchain update found.",
+    "event.toolUpdatesCurrent": "Tools match the latest released manifest.",
     "event.toolsInstalled": "Toolchain installed.",
     "event.toolsPartial": "Tool install completed with missing tools.",
     "event.toolInstallFailed": "Tool install failed.",
@@ -197,10 +199,11 @@ const translations = {
     "action.reset": "重置",
     "action.chooseCookies": "选择 Cookie 文件",
     "action.clearCookies": "清除",
-    "action.refresh": "刷新",
+    "action.verifyTools": "验证工具",
+    "action.checkToolUpdates": "检查工具更新",
     "action.installTools": "安装工具",
     "action.updateTools": "更新工具",
-    "action.repairTools": "修复工具",
+    "action.reinstallTools": "重新安装工具",
     "action.checkUpdates": "检查更新",
     "action.openRelease": "打开发布页",
     "action.projectHome": "项目主页",
@@ -238,6 +241,7 @@ const translations = {
     "notice.toolchainReady": "工具链已就绪。",
     "notice.toolsMissing": "缺少部分工具。",
     "notice.toolsOutdated": "工具链有可用更新。",
+    "notice.toolsDamaged": "工具链需要重新安装。",
     "notice.toolCheckFailed": "工具检查失败。",
     "notice.toolsInstalled": "工具链已安装。",
     "notice.toolInstallNeedsAttention": "工具安装需要处理。",
@@ -267,12 +271,19 @@ const translations = {
     "settings.installMissing": "可自动安装缺失工具。",
     "settings.installingTools": "正在安装缺失工具...",
     "settings.updatingTools": "正在更新到固定版本...",
-    "settings.repairingTools": "正在修复工具链...",
+    "settings.reinstallingTools": "正在重新安装受管工具...",
     "settings.toolsPathPending": "工具路径尚未解析",
     "settings.toolsChecking": "正在检查工具链...",
     "settings.toolsAvailable": "所需工具均可用。",
     "settings.toolsMissing": "可自动安装缺失工具。",
-    "settings.toolsOutdated": "部分工具需要更新或修复。",
+    "settings.toolsDamaged": "部分工具缺失、损坏，或与当前清单不匹配。",
+    "settings.toolUpdatesChecking": "正在检查最新发布的工具清单...",
+    "settings.toolUpdatesAvailable": "有已发布的工具链更新。",
+    "settings.toolUpdatesCurrent": "工具链与最新发布清单一致。",
+    "settings.toolUpdatesNoManifest": "最新发布暂未附带工具清单。",
+    "settings.toolUpdatesInvalidManifest": "发布的工具清单无法读取。",
+    "settings.toolUpdatesFailed": "工具更新检查失败：{message}",
+    "settings.reinstallConfirm": "重新安装 {path} 下的受管工具？这会删除工具目录和临时工具下载，然后重新下载并校验工具。",
     "settings.toolCheckFailed": "工具检查失败。",
     "settings.toolsInstalled": "工具链已安装。",
     "settings.toolsInstallPartial": "安装结束，但仍有工具需要处理。",
@@ -286,7 +297,9 @@ const translations = {
     "event.booted": "应用已启动。",
     "event.toolsAvailable": "yt-dlp、ffmpeg、ffprobe 和 deno 均可用。",
     "event.toolsMissing": "工具检查发现缺失项。",
-    "event.toolsOutdated": "工具检查发现需要更新或修复的项目。",
+    "event.toolsDamaged": "工具检查发现需要重新安装的项目。",
+    "event.toolUpdatesAvailable": "发现已发布的工具链更新。",
+    "event.toolUpdatesCurrent": "工具链与最新发布清单一致。",
     "event.toolsInstalled": "工具链已安装。",
     "event.toolsPartial": "工具安装完成，但仍有缺失项。",
     "event.toolInstallFailed": "工具安装失败。",
@@ -306,7 +319,6 @@ type Language = keyof typeof translations;
 type TranslationKey = keyof (typeof translations)["en"];
 type NoticeTone = "success" | "warning" | "error";
 type UpdateTone = "neutral" | "success" | "warning" | "error";
-type ToolAction = "install" | "update" | "repair";
 
 const state = {
   metadata: null as VideoMetadata | null,
@@ -316,7 +328,8 @@ const state = {
   cancelRequested: false,
   lastUrl: "",
   toolsReady: false,
-  toolAction: "install" as ToolAction,
+  toolAction: null as ToolAction | null,
+  pendingToolManifestJson: null as string | null,
   updateChecking: false,
   latestReleaseUrl: "",
   updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
@@ -341,8 +354,10 @@ const elements = {
   settingsDrawer: must<HTMLElement>("#settings-drawer"),
   languageEn: must<HTMLButtonElement>("#language-en"),
   languageZh: must<HTMLButtonElement>("#language-zh"),
-  refreshTools: must<HTMLButtonElement>("#refresh-tools"),
+  verifyTools: must<HTMLButtonElement>("#verify-tools"),
+  checkToolUpdates: must<HTMLButtonElement>("#check-tool-updates"),
   installTools: must<HTMLButtonElement>("#install-tools"),
+  reinstallTools: must<HTMLButtonElement>("#reinstall-tools"),
   browseFolder: must<HTMLButtonElement>("#browse-folder"),
   resetFolder: must<HTMLButtonElement>("#reset-folder"),
   saveFolder: must<HTMLButtonElement>("#save-folder"),
@@ -449,7 +464,7 @@ function applyTranslations() {
   }
   renderCookiesFile(state.cookiesFile);
   updateGithubAccessButtons();
-  updateInstallButtonLabel();
+  updateToolActionButton();
 }
 
 function setLanguage(language: Language) {
@@ -493,8 +508,10 @@ function bindEvents() {
   elements.settingsBackdrop.addEventListener("click", () => setSettingsOpen(false));
   elements.languageEn.addEventListener("click", () => setLanguage("en"));
   elements.languageZh.addEventListener("click", () => setLanguage("zh"));
-  elements.refreshTools.addEventListener("click", () => void refreshTools());
+  elements.verifyTools.addEventListener("click", () => void verifyTools());
+  elements.checkToolUpdates.addEventListener("click", () => void checkToolUpdates());
   elements.installTools.addEventListener("click", () => void installTools());
+  elements.reinstallTools.addEventListener("click", () => void reinstallTools());
   elements.openFolder.addEventListener("click", () => void openDownloadFolder());
   elements.browseFolder.addEventListener("click", () => void browseDownloadFolder());
   elements.saveFolder.addEventListener("click", () => void saveDownloadFolder());
@@ -535,7 +552,7 @@ async function bootstrap() {
   renderEmptyPreview(t("preview.emptyStart"));
   logEvent(t("event.booted"));
   await loadAppState();
-  await refreshTools();
+  await verifyTools();
 }
 
 async function loadAppState() {
@@ -546,44 +563,139 @@ async function loadAppState() {
   renderCookiesFile(appState.cookies_file ?? null);
 }
 
-async function refreshTools() {
+async function verifyTools() {
   setBusy(true, undefined, "tools");
+  state.pendingToolManifestJson = null;
   elements.toolInstallStatus.textContent = t("settings.toolsChecking");
   try {
     const tools = await invoke<ToolStatus[]>("check_tools");
-    const summary = summarizeTools(tools);
-    state.toolsReady = summary.ready;
-    state.toolAction = summary.action;
-    renderTools(tools);
-    updateInstallButtonLabel();
-    elements.toolInstallStatus.textContent = t(summary.settingsKey);
-    showNotice(t(summary.noticeKey), summary.tone);
-    logEvent(t(summary.eventKey));
+    applyToolSummary(tools, "local");
   } catch (error) {
     state.toolsReady = false;
     state.toolAction = "install";
     const message = String(error);
     elements.toolInstallStatus.textContent = message || t("settings.toolCheckFailed");
     showNotice(message || t("settings.toolCheckFailed"), "error");
+    updateToolActionButton();
   } finally {
     setBusy(false);
   }
 }
 
 async function installTools() {
-  if (state.busy) {
+  if (state.busy || !state.toolAction) {
+    return;
+  }
+
+  if (state.toolAction === "reinstall") {
+    await reinstallTools();
     return;
   }
 
   setBusy(true, undefined, "tools");
   elements.toolInstallStatus.textContent = t(toolActionStatusKey(state.toolAction));
   try {
-    const tools = await invoke<ToolStatus[]>("install_tools");
-    const summary = summarizeTools(tools);
-    state.toolsReady = summary.ready;
-    state.toolAction = summary.action;
-    renderTools(tools);
-    updateInstallButtonLabel();
+    const tools = state.pendingToolManifestJson
+      ? await invoke<ToolStatus[]>("install_tools_from_manifest", { manifestJson: state.pendingToolManifestJson })
+      : await invoke<ToolStatus[]>("install_tools");
+    state.pendingToolManifestJson = null;
+    applyToolSummary(tools, "local");
+    elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
+    showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
+    logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
+  } catch (error) {
+    const message = String(error);
+    elements.toolInstallStatus.textContent = message || t("settings.toolInstallFailed");
+    showNotice(message || t("settings.toolInstallFailed"), "error");
+    logEvent(`${t("event.toolInstallFailed")} ${message}`.trim());
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function checkToolUpdates() {
+  if (state.busy) {
+    return;
+  }
+
+  setBusy(true, undefined, "tools");
+  state.pendingToolManifestJson = null;
+  if (state.toolAction === "update") {
+    state.toolAction = null;
+    updateToolActionButton();
+  }
+  elements.toolInstallStatus.textContent = t("settings.toolUpdatesChecking");
+  try {
+    const releaseResponse = await fetch(resolveGithubUrl(LATEST_RELEASE_API_URL, state.githubAccessMode), {
+      cache: "no-store",
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    if (releaseResponse.status === 404) {
+      elements.toolInstallStatus.textContent = t("updates.noRelease");
+      showNotice(t("updates.noRelease"), "warning");
+      return;
+    }
+
+    if (!releaseResponse.ok) {
+      throw new Error((await parseGithubHttpError(releaseResponse)).message);
+    }
+
+    const releasePayload = await releaseResponse.json();
+    const manifestAsset = findToolManifestAsset(releasePayload);
+    if (!manifestAsset) {
+      elements.toolInstallStatus.textContent = t("settings.toolUpdatesNoManifest");
+      showNotice(t("settings.toolUpdatesNoManifest"), "warning");
+      return;
+    }
+
+    const manifestResponse = await fetch(resolveGithubUrl(manifestAsset.downloadUrl, state.githubAccessMode), {
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!manifestResponse.ok) {
+      throw new Error((await parseGithubHttpError(manifestResponse)).message);
+    }
+
+    const manifestJson = await manifestResponse.text();
+    const tools = await invoke<ToolStatus[]>("check_tools_with_manifest", { manifestJson });
+    const summary = applyToolSummary(tools, "remote");
+    if (summary.action) {
+      state.pendingToolManifestJson = manifestJson;
+      updateToolActionButton();
+    } else {
+      elements.toolInstallStatus.textContent = t("settings.toolUpdatesCurrent");
+      logEvent(t("event.toolUpdatesCurrent"));
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    elements.toolInstallStatus.textContent = t("settings.toolUpdatesFailed", { message });
+    showNotice(t("settings.toolUpdatesFailed", { message }), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function reinstallTools() {
+  if (state.busy) {
+    return;
+  }
+
+  const path = elements.toolRoot.textContent || t("settings.toolsPathPending");
+  if (!window.confirm(t("settings.reinstallConfirm", { path }))) {
+    return;
+  }
+
+  setBusy(true, undefined, "tools");
+  elements.toolInstallStatus.textContent = t("settings.reinstallingTools");
+  try {
+    const tools = await invoke<ToolStatus[]>("reinstall_tools", { manifestJson: null });
+    applyToolSummary(tools, "local");
     elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
     showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
     logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
@@ -957,59 +1069,16 @@ function renderTools(tools: ToolStatus[]) {
   );
 }
 
-function summarizeTools(tools: ToolStatus[]): {
-  ready: boolean;
-  action: ToolAction;
-  settingsKey: TranslationKey;
-  noticeKey: TranslationKey;
-  eventKey: TranslationKey;
-  tone: NoticeTone;
-} {
-  const hasMissing = tools.some((tool) => tool.availability === "missing");
-  const hasAttention = tools.some((tool) => tool.availability === "outdated" || tool.availability === "cannot_execute");
-  const ready = tools.length > 0 && tools.every((tool) => tool.availability === "available");
-
-  if (ready) {
-    return {
-      ready: true,
-      action: "repair",
-      settingsKey: "settings.toolsAvailable",
-      noticeKey: "notice.toolchainReady",
-      eventKey: "event.toolsAvailable",
-      tone: "success",
-    };
-  }
-
-  if (hasMissing) {
-    return {
-      ready: false,
-      action: "install",
-      settingsKey: "settings.toolsMissing",
-      noticeKey: "notice.toolsMissing",
-      eventKey: "event.toolsMissing",
-      tone: "warning",
-    };
-  }
-
-  if (hasAttention) {
-    return {
-      ready: false,
-      action: "update",
-      settingsKey: "settings.toolsOutdated",
-      noticeKey: "notice.toolsOutdated",
-      eventKey: "event.toolsOutdated",
-      tone: "warning",
-    };
-  }
-
-  return {
-    ready: false,
-    action: "install",
-    settingsKey: "settings.toolsMissing",
-    noticeKey: "notice.toolsMissing",
-    eventKey: "event.toolsMissing",
-    tone: "warning",
-  };
+function applyToolSummary(tools: ToolStatus[], mode: ToolSummaryMode) {
+  const summary = summarizeTools(tools, mode);
+  state.toolsReady = summary.ready;
+  state.toolAction = summary.action;
+  renderTools(tools);
+  updateToolActionButton();
+  elements.toolInstallStatus.textContent = t(summary.settingsKey);
+  showNotice(t(summary.noticeKey), summary.tone);
+  logEvent(t(summary.eventKey));
+  return summary;
 }
 
 function formatToolVersion(tool: ToolStatus) {
@@ -1070,15 +1139,24 @@ function setBusy(isBusy: boolean, progressText?: string, operation: "metadata" |
   updateButtons();
 }
 
-function updateInstallButtonLabel() {
+function updateToolActionButton() {
+  elements.installTools.hidden = state.toolAction === null;
+  if (!state.toolAction) {
+    return;
+  }
+
   const labelKey =
-    state.toolAction === "repair" ? "action.repairTools" : state.toolAction === "update" ? "action.updateTools" : "action.installTools";
+    state.toolAction === "reinstall"
+      ? "action.reinstallTools"
+      : state.toolAction === "update"
+        ? "action.updateTools"
+        : "action.installTools";
   elements.installTools.textContent = t(labelKey);
 }
 
-function toolActionStatusKey(action: ToolAction): TranslationKey {
-  if (action === "repair") {
-    return "settings.repairingTools";
+function toolActionStatusKey(action: ToolAction | null): TranslationKey {
+  if (action === "reinstall") {
+    return "settings.reinstallingTools";
   }
   if (action === "update") {
     return "settings.updatingTools";
@@ -1100,8 +1178,10 @@ function updateButtons() {
   elements.cancel.disabled = state.activeOperation !== "download" || state.cancelRequested;
   elements.chooseCookies.disabled = state.busy;
   elements.clearCookies.disabled = state.busy || !state.cookiesFile;
-  elements.refreshTools.disabled = state.busy;
-  elements.installTools.disabled = state.busy;
+  elements.verifyTools.disabled = state.busy;
+  elements.checkToolUpdates.disabled = state.busy;
+  elements.installTools.disabled = state.busy || !state.toolAction;
+  elements.reinstallTools.disabled = state.busy;
   elements.browseFolder.disabled = state.busy;
   elements.saveFolder.disabled = state.busy;
   elements.resetFolder.disabled = state.busy;

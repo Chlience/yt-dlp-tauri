@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 中文
+
+- Settings 工具链操作改为验证工具、检查工具更新、安装、更新和重新安装，不再使用含义模糊的修复工具主操作。
+- 工具更新检查现在只读取 `yt-dlp-tauri` 最新 GitHub Release 附带的 `tools-manifest.json`，并继续按 SHA-256 安装受管工具。
+- Release workflow 会把 `tools-manifest.json` 上传为发布资产，供应用内工具更新检查使用。
+
+### English
+
+- Reworked Settings toolchain actions around verify, check tool updates, install, update, and reinstall, removing the ambiguous repair primary action.
+- Tool update checks now read only the `tools-manifest.json` attached to the latest `yt-dlp-tauri` GitHub Release and continue installing managed tools with SHA-256 verification.
+- The Release workflow now uploads `tools-manifest.json` as a release asset for in-app tool update checks.
+
 ## 0.1.8 - 2026-06-24
 
 ### 中文
