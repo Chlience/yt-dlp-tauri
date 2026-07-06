@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "retrievedAtUtc": "2026-06-23T00:00:00Z",
+  "retrievedAtUtc": "2026-07-06T07:25:54.471Z",
   "targets": [
     {
       "target": "win-x64",
@@ -8,9 +8,9 @@
         {
           "name": "yt-dlp",
           "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe",
-          "version": "2026.06.09",
-          "sha256": "3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe",
+          "version": "2026.07.04",
+          "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
           "kind": "file",
           "licenseNotes": "Official Windows standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
         },
@@ -52,9 +52,9 @@
         {
           "name": "yt-dlp",
           "path": "Tools/macos-x64/yt-dlp/yt-dlp",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos",
-          "version": "2026.06.09",
-          "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp_macos",
+          "version": "2026.07.04",
+          "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b",
           "kind": "file",
           "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
         },
@@ -96,9 +96,9 @@
         {
           "name": "yt-dlp",
           "path": "Tools/macos-arm64/yt-dlp/yt-dlp",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos",
-          "version": "2026.06.09",
-          "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp_macos",
+          "version": "2026.07.04",
+          "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b",
           "kind": "file",
           "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
         },

@@ -1,0 +1,16 @@
+{
+  "tag_name": "2026.07.04",
+  "html_url": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.04",
+  "assets": [
+    {
+      "name": "yt-dlp.exe",
+      "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe",
+      "digest": "sha256:52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
+    },
+    {
+      "name": "yt-dlp_macos",
+      "browser_download_url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp_macos",
+      "digest": "sha256:498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b"
+    }
+  ]
+}

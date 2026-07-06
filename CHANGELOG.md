@@ -6,10 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### 中文
 
+- 新增 yt-dlp manifest 更新机器人 workflow，上游发布新版本后可自动更新工具清单、测试 fixture、Windows 恢复脚本和 changelog，并创建维护 PR。
+- 将应用管理的 `yt-dlp` 更新到 `2026.07.04`，减少站点 extractor 过期导致的解析失败。
 - Toolchain Freshness 自动任务检查 yt-dlp 最新 release 时会使用 GitHub Actions token 认证请求，避免 GitHub API 未认证限流导致定时任务失败。
 
 ### English
 
+- Added a yt-dlp manifest update bot workflow that refreshes the tool manifest, test fixture, Windows restore script, and changelog before opening a maintenance PR.
+- Updated the app-managed `yt-dlp` to `2026.07.04` to reduce parsing failures caused by stale site extractors.
 - Toolchain Freshness now authenticates latest yt-dlp release checks with the GitHub Actions token to avoid scheduled failures from unauthenticated GitHub API rate limits.
 
 ## 0.1.11 - 2026-06-24
