@@ -78,6 +78,16 @@ test("GitHub adapter reports API failures with the repository", async () => {
   );
 });
 
+test("GitHub adapter accepts an empty optional release name", async () => {
+  const release = structuredClone(githubFixture[0]);
+  release.name = "";
+  const result = await fetchGitHubReleases("denoland/deno", {
+    fetchImpl: async () => new Response(JSON.stringify([release])),
+  });
+
+  assert.equal(result[0].name, null);
+});
+
 test("redirect adapter returns the immutable location", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const result = await resolveRedirectAsset(redirectFixture.sourceUrl, {
@@ -116,4 +126,23 @@ test("redirect adapter rejects a final URL on an unapproved host", async () => {
       }),
     /unapproved host downloads\.example\.test/,
   );
+});
+
+test("redirect adapter falls back to GET when the server mishandles HEAD", async () => {
+  const methods: string[] = [];
+  const result = await resolveRedirectAsset(redirectFixture.sourceUrl, {
+    approvedHosts: ["ffmpeg.martin-riedl.de"],
+    fetchImpl: async (_url, init) => {
+      methods.push(init?.method ?? "GET");
+      return init?.method === "HEAD"
+        ? new Response(null, { status: 404, statusText: "Not Found" })
+        : new Response(null, {
+            status: 307,
+            headers: { location: redirectFixture.location },
+          });
+    },
+  });
+
+  assert.deepEqual(methods, ["HEAD", "GET"]);
+  assert.equal(result.url, redirectFixture.location);
 });

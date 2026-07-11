@@ -27,10 +27,22 @@ export async function resolveRedirectAsset(
   const hosts = approvedHostSet(sourceUrl, approvedHosts);
   requireApprovedHttpsUrl(sourceUrl.toString(), hosts, "Release redirect URL");
 
-  const response = await fetchImpl(sourceUrl, {
-    method: "HEAD",
-    redirect: "manual",
-  });
+  let response;
+  try {
+    response = await fetchImpl(sourceUrl, {
+      method: "HEAD",
+      redirect: "manual",
+    });
+  } catch {
+    response = null;
+  }
+  if (!response || !REDIRECT_STATUSES.has(response.status)) {
+    response = await fetchImpl(sourceUrl, {
+      method: "GET",
+      redirect: "manual",
+    });
+    await response.body?.cancel().catch(() => {});
+  }
   if (!REDIRECT_STATUSES.has(response.status)) {
     throw new Error(`Expected release redirect for ${url}, received ${response.status}`);
   }

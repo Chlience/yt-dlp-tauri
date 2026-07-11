@@ -17,6 +17,12 @@ function requireNumber(value, label) {
   return value;
 }
 
+function optionalString(value, label) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  return requireString(value, label);
+}
+
 function normalizeSha256(digest, assetName) {
   if (digest === null || digest === undefined) return null;
   if (typeof digest !== "string") {
@@ -55,10 +61,7 @@ function normalizeRelease(releaseValue) {
   return {
     id: requireNumber(releaseValue.id, "release id"),
     tagName: requireString(releaseValue.tag_name, "tag_name"),
-    name:
-      releaseValue.name === null
-        ? null
-        : requireString(releaseValue.name, "release name"),
+    name: optionalString(releaseValue.name, "release name"),
     draft: Boolean(releaseValue.draft),
     prerelease: Boolean(releaseValue.prerelease),
     createdAt: requireString(releaseValue.created_at, "created_at"),
