@@ -39,12 +39,21 @@ Do not commit restored or downloaded tool binaries. The repository intentionally
 - `dist/`
 - `node_modules/`
 
-If a tool version changes, update both:
+Tool metadata is generated from a reviewed policy. Do not hand-edit:
 
+- `toolchain-lock.json`
 - `src-tauri/tools-manifest.json`
-- `scripts/download-tools.ps1`
+- `TOOLCHAIN_CHANGELOG.md`
 
-Use fixed release URLs and refreshed SHA-256 hashes. Do not use `latest` URLs in the production manifest.
+Change upstream sources or selection rules in `toolchain-policy.json`, then run a dry resolution:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" node scripts/update-toolchain.mjs --dry-run
+```
+
+The weekly workflow generates one combined pull request. Use `node scripts/update-toolchain.mjs --only <source-id>` only for a focused compatibility, security, or dead-URL repair. Generated manifests must use fixed release URLs and refreshed executable SHA-256 hashes.
+
+Repository automation requires the `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` secrets for the narrowly scoped GitHub App. Bot pull requests still require normal tests and maintainer review.
 
 ## Pull Requests
 

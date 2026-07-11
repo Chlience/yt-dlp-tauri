@@ -102,7 +102,10 @@ src-tauri/target/release/bundle/dmg/
 
 | Item | Purpose |
 | --- | --- |
-| `src-tauri/tools-manifest.json` | Fixed tool versions, source URLs, target names, and SHA-256 hashes. |
+| `toolchain-policy.json` | Reviewed upstream sources, version-selection rules, targets, and allowed hosts. |
+| `toolchain-lock.json` | Generated immutable release metadata and archive/executable SHA-256 hashes. |
+| `src-tauri/tools-manifest.json` | Generated runtime tool versions, fixed source URLs, target names, and executable hashes. |
+| `TOOLCHAIN_CHANGELOG.md` | Tool-only revision history, independent from application releases. |
 | `src-tauri/tauri.conf.json` | Tauri app metadata, fixed window size, bundle target, icons, and resources. |
 | `scripts/download-tools.ps1` | Optional development script that restores the pinned `win-x64` toolchain into the checkout. |
 | Settings: output folder | User-facing download directory selection, save, reset, and open actions. |
@@ -113,6 +116,18 @@ Current release scope:
 - Populated tool targets: `win-x64`, `macos-x64`, `macos-arm64`.
 - Planned manifest target: `win-arm64`, once every tool URL and hash is pinned.
 - Tool binaries are not committed to the repository.
+
+## Toolchain Maintenance
+
+The `Toolchain Discover` workflow resolves yt-dlp, Deno, FFmpeg, and FFprobe once per week and maintains one reviewed `bot/toolchain-weekly` pull request. `Toolchain Freshness` checks released source URLs daily and opens a focused emergency pull request for an affected source. Both workflows require human review before merge.
+
+The unified resolver can be inspected locally without changing files:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" node scripts/update-toolchain.mjs --dry-run
+```
+
+Source and selection changes belong in `toolchain-policy.json`. The resolver generates the lock, runtime manifest, and toolchain changelog together.
 
 ## Data, Storage, and Output
 
@@ -182,6 +197,8 @@ npm run tauri build
 - [Contributing](./CONTRIBUTING.md)
 - [Security policy](./SECURITY.md)
 - [Third-party notices](./THIRD-PARTY-NOTICES.md)
+- [Toolchain policy](./toolchain-policy.json)
+- [Toolchain changelog](./TOOLCHAIN_CHANGELOG.md)
 - [Tool manifest](./src-tauri/tools-manifest.json)
 
 ## Star History

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const CHECKOUT_SHA = "93cb6efe18208431cddfb8368fd83d5badbf9bfd";
@@ -51,4 +51,10 @@ test("toolchain automation pins every third-party action to a commit", () => {
       assert.match(line, /uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[a-f0-9]{40}\s*$/);
     }
   }
+});
+
+test("repository has one toolchain updater", () => {
+  assert.equal(existsSync(".github/workflows/update-yt-dlp.yml"), false);
+  assert.equal(existsSync("scripts/update-yt-dlp-manifest.mjs"), false);
+  assert.equal(existsSync("scripts/update-toolchain.mjs"), true);
 });

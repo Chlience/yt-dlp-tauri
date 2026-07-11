@@ -102,7 +102,10 @@ src-tauri/target/release/bundle/dmg/
 
 | 项 | 用途 |
 | --- | --- |
-| `src-tauri/tools-manifest.json` | 固定工具版本、来源 URL、target 名称和 SHA-256 哈希。 |
+| `toolchain-policy.json` | 经审核的上游来源、版本选择规则、target 和允许访问的 host。 |
+| `toolchain-lock.json` | 自动生成的不可变 release 元数据，以及归档和可执行文件 SHA-256。 |
+| `src-tauri/tools-manifest.json` | 自动生成的运行时工具版本、固定来源 URL、target 和可执行文件哈希。 |
+| `TOOLCHAIN_CHANGELOG.md` | 独立于应用 release 的工具版本历史。 |
 | `src-tauri/tauri.conf.json` | Tauri 应用元信息、固定窗口尺寸、bundle target、图标和资源。 |
 | `scripts/download-tools.ps1` | 可选开发脚本，把 pinned `win-x64` 工具链还原到 checkout 中。 |
 | Settings: output folder | 用户侧下载目录选择、保存、重置和打开入口。 |
@@ -113,6 +116,18 @@ src-tauri/target/release/bundle/dmg/
 - 已填充工具 target：`win-x64`、`macos-x64`、`macos-arm64`。
 - 计划中的 manifest target：`win-arm64`，等所有工具 URL 和 hash 都固定后再补齐。
 - 仓库不提交工具二进制。
+
+## 工具链维护
+
+`Toolchain Discover` workflow 每周解析一次 yt-dlp、Deno、FFmpeg 和 FFprobe，并维护一个经人工审核的 `bot/toolchain-weekly` PR。`Toolchain Freshness` 每天检查已发布的来源 URL，并为失效来源创建独立的紧急 PR。所有变更都需要维护者审核后合并。
+
+可以在本地只查看统一解析结果，不修改文件：
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" node scripts/update-toolchain.mjs --dry-run
+```
+
+来源和选择规则写在 `toolchain-policy.json`。解析器会一起生成 lock、运行时 manifest 和工具链 changelog。
 
 ## 数据、存储和输出
 
@@ -182,6 +197,8 @@ npm run tauri build
 - [贡献说明](./CONTRIBUTING.md)
 - [安全策略](./SECURITY.md)
 - [第三方声明](./THIRD-PARTY-NOTICES.md)
+- [工具链策略](./toolchain-policy.json)
+- [工具链变更记录](./TOOLCHAIN_CHANGELOG.md)
 - [工具 manifest](./src-tauri/tools-manifest.json)
 
 ## 星标历史
