@@ -11,6 +11,7 @@ const githubFixture = JSON.parse(
 const redirectFixture = JSON.parse(
   readFileSync("tests/fixtures/toolchain/redirect-releases.json", "utf8"),
 );
+const redirectSha256 = "a".repeat(64);
 
 test("GitHub adapter authenticates, paginates, and normalizes releases", async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -94,6 +95,9 @@ test("redirect adapter returns the immutable location", async () => {
     approvedHosts: ["ffmpeg.martin-riedl.de"],
     fetchImpl: async (url, init) => {
       calls.push({ url: String(url), init });
+      if (String(url).endsWith(".sha256")) {
+        return new Response(`${redirectSha256}  ffmpeg.zip\n`);
+      }
       return new Response(null, {
         status: 302,
         headers: { location: redirectFixture.location },
@@ -101,13 +105,16 @@ test("redirect adapter returns the immutable location", async () => {
     },
   });
 
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].init?.method, "HEAD");
   assert.equal(calls[0].init?.redirect, "manual");
+  assert.equal(calls[1].url, `${redirectFixture.location}.sha256`);
+  assert.equal(calls[1].init?.method, "GET");
   assert.deepEqual(result, {
     url: redirectFixture.location,
     version: redirectFixture.version,
     checksumUrl: `${redirectFixture.location}.sha256`,
+    sha256: redirectSha256,
   });
 });
 
@@ -132,8 +139,11 @@ test("redirect adapter falls back to GET when the server mishandles HEAD", async
   const methods: string[] = [];
   const result = await resolveRedirectAsset(redirectFixture.sourceUrl, {
     approvedHosts: ["ffmpeg.martin-riedl.de"],
-    fetchImpl: async (_url, init) => {
+    fetchImpl: async (url, init) => {
       methods.push(init?.method ?? "GET");
+      if (String(url).endsWith(".sha256")) {
+        return new Response(`${redirectSha256}  ffmpeg.zip\n`);
+      }
       return init?.method === "HEAD"
         ? new Response(null, { status: 404, statusText: "Not Found" })
         : new Response(null, {
@@ -143,6 +153,23 @@ test("redirect adapter falls back to GET when the server mishandles HEAD", async
     },
   });
 
-  assert.deepEqual(methods, ["HEAD", "GET"]);
+  assert.deepEqual(methods, ["HEAD", "GET", "GET"]);
   assert.equal(result.url, redirectFixture.location);
+});
+
+test("redirect adapter rejects a checksum for another asset", async () => {
+  await assert.rejects(
+    () =>
+      resolveRedirectAsset(redirectFixture.sourceUrl, {
+        approvedHosts: ["ffmpeg.martin-riedl.de"],
+        fetchImpl: async (url) =>
+          String(url).endsWith(".sha256")
+            ? new Response(`${redirectSha256}  ffprobe.zip\n`)
+            : new Response(null, {
+                status: 307,
+                headers: { location: redirectFixture.location },
+              }),
+      }),
+    /checksum names ffprobe\.zip, expected ffmpeg\.zip/,
+  );
 });

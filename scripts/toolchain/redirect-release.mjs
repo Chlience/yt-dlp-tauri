@@ -19,6 +19,18 @@ function requireApprovedHttpsUrl(value, approvedHosts, label) {
   return parsed;
 }
 
+function parseChecksum(text, expectedName, checksumUrl) {
+  const match = text.trim().match(/^([a-f0-9]{64})[ \t]+\*?([^\r\n]+)$/i);
+  if (!match) {
+    throw new Error(`Invalid SHA-256 checksum response from ${checksumUrl}`);
+  }
+  const checksumName = match[2].trim();
+  if (checksumName !== expectedName) {
+    throw new Error(`SHA-256 checksum names ${checksumName}, expected ${expectedName}`);
+  }
+  return match[1].toLowerCase();
+}
+
 export async function resolveRedirectAsset(
   url,
   { fetchImpl = fetch, approvedHosts } = {},
@@ -63,9 +75,32 @@ export async function resolveRedirectAsset(
 
   const checksumUrl = new URL(resolved);
   checksumUrl.pathname = `${checksumUrl.pathname}.sha256`;
+  const checksumResponse = await fetchImpl(checksumUrl, {
+    method: "GET",
+    redirect: "error",
+    headers: {
+      Accept: "text/plain",
+      "User-Agent": "yt-dlp-tauri-toolchain-discovery",
+    },
+  });
+  if (!checksumResponse.ok) {
+    throw new Error(
+      `Failed to fetch SHA-256 checksum ${checksumUrl}: ${checksumResponse.status} ${checksumResponse.statusText}`,
+    );
+  }
+  if (checksumResponse.url) {
+    requireApprovedHttpsUrl(checksumResponse.url, hosts, "Resolved checksum URL");
+  }
+  const contentLength = Number(checksumResponse.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > 4096) {
+    throw new Error(`SHA-256 checksum response is too large: ${checksumUrl}`);
+  }
+  const expectedName = resolved.pathname.split("/").at(-1);
+  const sha256 = parseChecksum(await checksumResponse.text(), expectedName, checksumUrl);
   return {
     url: resolved.toString(),
     version,
     checksumUrl: checksumUrl.toString(),
+    sha256,
   };
 }
