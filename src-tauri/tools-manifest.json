@@ -1,5 +1,6 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
+  "revision": "20260706.1",
   "retrievedAtUtc": "2026-07-06T07:25:54.471Z",
   "targets": [
     {
