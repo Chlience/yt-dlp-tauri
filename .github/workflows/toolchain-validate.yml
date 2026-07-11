@@ -1,0 +1,551 @@
+name: Toolchain Validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-native:
+    name: Validate ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+            architecture: x64
+          - target: macos-x64
+            runner: macos-15-intel
+            architecture: x64
+          - target: macos-arm64
+            runner: macos-15
+            architecture: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          workspaces: src-tauri -> target
+          key: toolchain-${{ matrix.target }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Prepare baseline, candidate, and diagnostic manifests
+        shell: bash
+        env:
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+
+          mkdirSync(".toolchain/manifests", { recursive: true });
+          const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+          const writeJson = (path, value) =>
+            writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+          const baselineRefs = [process.env.BASELINE_SHA, "HEAD^"]
+            .filter(Boolean);
+          const showBaseline = (path) => {
+            for (const ref of baselineRefs) {
+              try {
+                return execFileSync("git", ["show", `${ref}:${path}`], {
+                  encoding: "utf8",
+                });
+              } catch {}
+            }
+            throw new Error(`Unable to read baseline ${path}`);
+          };
+
+          const candidateManifest = readJson("src-tauri/tools-manifest.json");
+          const baselineManifestJson = showBaseline("src-tauri/tools-manifest.json");
+          const baselineLockJson = showBaseline("toolchain-lock.json");
+          const baselineManifest = JSON.parse(baselineManifestJson);
+          copyFileSync("src-tauri/tools-manifest.json", ".toolchain/manifests/candidate.json");
+          copyFileSync("toolchain-lock.json", ".toolchain/manifests/candidate-lock.json");
+          writeFileSync(".toolchain/manifests/baseline.json", baselineManifestJson, "utf8");
+          writeFileSync(".toolchain/manifests/baseline-lock.json", baselineLockJson, "utf8");
+
+          const units = new Map([
+            ["yt-dlp", new Set(["yt-dlp"])],
+            ["deno", new Set(["deno"])],
+            ["ffmpeg", new Set(["ffmpeg", "ffprobe"])],
+          ]);
+          for (const [unit, names] of units) {
+            const targets = baselineManifest.targets.map((baselineTarget) => {
+              const candidateTarget = candidateManifest.targets.find(
+                (target) => target.target === baselineTarget.target,
+              );
+              if (!candidateTarget) {
+                throw new Error(`Candidate is missing ${baselineTarget.target}`);
+              }
+              const tools = baselineTarget.tools.map((baselineTool) => {
+                if (!names.has(baselineTool.name)) return baselineTool;
+                const candidateTool = candidateTarget.tools.find(
+                  (tool) => tool.name === baselineTool.name,
+                );
+                if (!candidateTool) {
+                  throw new Error(
+                    `Candidate is missing ${baselineTarget.target}/${baselineTool.name}`,
+                  );
+                }
+                return candidateTool;
+              });
+              return { ...baselineTarget, tools };
+            });
+            writeJson(`.toolchain/manifests/diagnostic-${unit}.json`, {
+              ...candidateManifest,
+              targets,
+            });
+          }
+          NODE
+
+      - name: Build native smoke binary
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --bin toolchain-smoke
+
+      - name: Baseline smoke
+        id: baseline_smoke
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p .toolchain/results
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" \
+            --manifest .toolchain/manifests/baseline.json \
+            --target "$TARGET" \
+            --root "$RUNNER_TEMP/toolchain-baseline/$TARGET" \
+            --report ".toolchain/results/baseline-${TARGET}.json"
+
+      - name: Baseline deterministic compatibility
+        id: baseline_compatibility
+        if: ${{ steps.baseline_smoke.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/baseline-${TARGET}.json" \
+            --report ".toolchain/results/baseline-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/toolchain-baseline-compatibility/$TARGET"
+
+      - name: Candidate smoke
+        id: candidate_smoke
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" \
+            --manifest .toolchain/manifests/candidate.json \
+            --target "$TARGET" \
+            --root "$RUNNER_TEMP/toolchain-candidate/$TARGET" \
+            --report ".toolchain/results/candidate-${TARGET}.json"
+
+      - name: Candidate deterministic compatibility
+        id: candidate_compatibility
+        if: ${{ steps.candidate_smoke.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/candidate-${TARGET}.json" \
+            --report ".toolchain/results/candidate-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/toolchain-candidate-compatibility/$TARGET"
+
+      - name: Diagnostic yt-dlp
+        id: diagnostic_ytdlp
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-yt-dlp.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-yt-dlp/$TARGET" \
+            --report ".toolchain/results/diagnostic-yt-dlp-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-yt-dlp-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-yt-dlp-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-yt-dlp-compatibility/$TARGET"
+
+      - name: Diagnostic Deno
+        id: diagnostic_deno
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-deno.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-deno/$TARGET" \
+            --report ".toolchain/results/diagnostic-deno-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-deno-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-deno-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-deno-compatibility/$TARGET"
+
+      - name: Diagnostic FFmpeg
+        id: diagnostic_ffmpeg
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-ffmpeg.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-ffmpeg/$TARGET" \
+            --report ".toolchain/results/diagnostic-ffmpeg-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-ffmpeg-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-ffmpeg-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-ffmpeg-compatibility/$TARGET"
+
+      - name: Verify Windows FFmpeg mirror candidate
+        id: mirror_candidate
+        if: ${{ matrix.target == 'win-x64' && steps.candidate_smoke.outcome == 'success' && steps.candidate_compatibility.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { createWriteStream, readFileSync, writeFileSync } from "node:fs";
+          import { mkdir } from "node:fs/promises";
+          import { basename, join } from "node:path";
+          import { Readable, Transform } from "node:stream";
+          import { pipeline } from "node:stream/promises";
+
+          const lock = JSON.parse(readFileSync("toolchain-lock.json", "utf8"));
+          const source = lock.sources.find((item) => item.id === "ffmpeg-windows");
+          const asset = source?.assets.find((item) => item.target === "win-x64");
+          if (!asset) throw new Error("Windows FFmpeg lock asset is missing");
+          const response = await fetch(asset.sourceUrl, {
+            headers: { "User-Agent": "yt-dlp-tauri-toolchain-validation" },
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Failed to download Windows FFmpeg: ${response.status}`);
+          }
+          await mkdir(".toolchain/mirror-candidates", { recursive: true });
+          const mirrorName = `ffmpeg-win-x64-${lock.revision}.zip`;
+          const destination = join(".toolchain/mirror-candidates", mirrorName);
+          const hash = createHash("sha256");
+          let size = 0;
+          const hasher = new Transform({
+            transform(chunk, _encoding, callback) {
+              hash.update(chunk);
+              size += chunk.length;
+              callback(null, chunk);
+            },
+          });
+          await pipeline(
+            Readable.fromWeb(response.body),
+            hasher,
+            createWriteStream(destination, { flags: "wx" }),
+          );
+          const sha256 = hash.digest("hex");
+          if (sha256 !== asset.sha256 || size !== asset.size) {
+            throw new Error(
+              `Windows FFmpeg verification failed: ${sha256}/${size}`,
+            );
+          }
+          writeFileSync(
+            join(".toolchain/mirror-candidates", `ffmpeg-source-${lock.revision}.json`),
+            `${JSON.stringify({
+              schemaVersion: 1,
+              revision: lock.revision,
+              sourceId: source.id,
+              releaseId: asset.releaseId,
+              assetId: asset.assetId,
+              upstreamName: basename(asset.assetName),
+              mirrorName,
+              sourceUrl: asset.sourceUrl,
+              size,
+              sha256,
+            }, null, 2)}\n`,
+            "utf8",
+          );
+          NODE
+
+      - name: Run project tests
+        id: project_tests
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          status=0
+          npm test || status=1
+          npm run build || status=1
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib || status=1
+          cargo check --locked --manifest-path src-tauri/Cargo.toml || status=1
+          exit "$status"
+
+      - name: Create target validation report
+        if: ${{ always() }}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          RUNNER_LABEL: ${{ matrix.runner }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          BASELINE_SMOKE: ${{ steps.baseline_smoke.outcome }}
+          BASELINE_COMPATIBILITY: ${{ steps.baseline_compatibility.outcome }}
+          CANDIDATE_SMOKE: ${{ steps.candidate_smoke.outcome }}
+          CANDIDATE_COMPATIBILITY: ${{ steps.candidate_compatibility.outcome }}
+          MIRROR_CANDIDATE: ${{ steps.mirror_candidate.outcome }}
+          PROJECT_TESTS: ${{ steps.project_tests.outcome }}
+          DIAGNOSTIC_YTDLP: ${{ steps.diagnostic_ytdlp.outcome }}
+          DIAGNOSTIC_DENO: ${{ steps.diagnostic_deno.outcome }}
+          DIAGNOSTIC_FFMPEG: ${{ steps.diagnostic_ffmpeg.outcome }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+          import {
+            canonicalValidationJson,
+            createTargetReport,
+          } from "./scripts/toolchain/validation-report.mjs";
+
+          const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+          const target = process.env.TARGET;
+          const manifest = readJson(".toolchain/manifests/candidate.json");
+          const lock = readJson(".toolchain/manifests/candidate-lock.json");
+          const manifestTarget = manifest.targets.find((item) => item.target === target);
+          if (!manifestTarget) throw new Error(`Candidate manifest is missing ${target}`);
+          const smokePath = `.toolchain/results/candidate-${target}.json`;
+          const smoke = existsSync(smokePath) ? readJson(smokePath) : null;
+          const statusByName = new Map((smoke?.tools ?? []).map((tool) => [tool.name, tool]));
+          const tools = manifestTarget.tools.map((tool) => ({
+            name: tool.name,
+            version: statusByName.get(tool.name)?.version ?? tool.version,
+          }));
+          const matchingAssets = lock.sources.flatMap((source) =>
+            source.assets
+              .filter((asset) => asset.target === target)
+              .map((asset) => ({ sourceId: source.id, asset })),
+          );
+          const assets = matchingAssets.map(({ sourceId, asset }) => ({
+            sourceId,
+            releaseId: asset.releaseId,
+            assetId: asset.assetId,
+            assetName: asset.assetName,
+            sourceUrl: asset.sourceUrl,
+            size: asset.size,
+            officialSha256: asset.sha256,
+          }));
+          const extractedHashes = matchingAssets.flatMap(({ asset }) =>
+            asset.members.map((member) => ({
+              tool: member.tool,
+              path: member.path,
+              sha256: member.sha256,
+            })),
+          );
+          const diagnostics = [
+            ["yt-dlp", process.env.DIAGNOSTIC_YTDLP],
+            ["deno", process.env.DIAGNOSTIC_DENO],
+            ["ffmpeg", process.env.DIAGNOSTIC_FFMPEG],
+          ]
+            .filter(([, outcome]) => outcome === "success" || outcome === "failure")
+            .map(([sourceUnit, outcome]) => ({
+              sourceUnit,
+              success: outcome === "success",
+              summary: `Diagnostic ${outcome}`,
+            }));
+          if (
+            process.env.BASELINE_SMOKE !== "success" ||
+            process.env.BASELINE_COMPATIBILITY !== "success"
+          ) {
+            diagnostics.push({
+              sourceUnit: "baseline",
+              success: false,
+              summary: "Infrastructure baseline failed",
+            });
+          }
+          const mirrorOk =
+            target !== "win-x64" ||
+            process.env.CANDIDATE_COMPATIBILITY !== "success" ||
+            process.env.MIRROR_CANDIDATE === "success";
+          const checks = {
+            supplyChain: smoke !== null && mirrorOk,
+            executables: process.env.CANDIDATE_SMOKE === "success",
+            dash: process.env.CANDIDATE_COMPATIBILITY === "success",
+            projectTests: process.env.PROJECT_TESTS === "success",
+          };
+          const report = createTargetReport({
+            target,
+            success: Object.values(checks).every(Boolean),
+            runnerImage:
+              [process.env.ImageOS, process.env.ImageVersion].filter(Boolean).join("@") ||
+              process.env.RUNNER_LABEL,
+            architecture: process.env.ARCHITECTURE,
+            checks,
+            tools,
+            assets,
+            extractedHashes,
+            diagnostics,
+          });
+          mkdirSync(".toolchain/target-reports", { recursive: true });
+          writeFileSync(
+            `.toolchain/target-reports/${target}.json`,
+            canonicalValidationJson(report),
+            "utf8",
+          );
+          NODE
+
+      - name: Upload target report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-target-${{ matrix.target }}
+          path: .toolchain/target-reports/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload toolchain mirror candidates
+        if: ${{ matrix.target == 'win-x64' && steps.mirror_candidate.outcome == 'success' && steps.project_tests.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-mirror-candidates
+          path: .toolchain/mirror-candidates
+          if-no-files-found: error
+          retention-days: 14
+
+  toolchain-validation:
+    name: toolchain-validation
+    if: ${{ always() }}
+    needs: validate-native
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+
+      - name: Download target reports
+        id: download_reports
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: toolchain-target-*
+          path: .toolchain/downloaded-reports
+          merge-multiple: true
+
+      - name: Merge and validate native reports
+        id: aggregate
+        continue-on-error: true
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import {
+            canonicalValidationJson,
+            mergeTargetReports,
+            validatePublicationReport,
+          } from "./scripts/toolchain/validation-report.mjs";
+
+          const reportDirectory = ".toolchain/downloaded-reports";
+          const names = (await readdir(reportDirectory)).filter((name) => name.endsWith(".json"));
+          const reports = await Promise.all(
+            names.map(async (name) =>
+              JSON.parse(await readFile(join(reportDirectory, name), "utf8")),
+            ),
+          );
+          const lockBytes = await readFile("toolchain-lock.json");
+          const manifestBytes = await readFile("src-tauri/tools-manifest.json");
+          const lock = JSON.parse(lockBytes);
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const context = {
+            revision: lock.revision,
+            commitSha: process.env.COMMIT_SHA,
+            manifestSha256: sha256(manifestBytes),
+            lockSha256: sha256(lockBytes),
+            runId: process.env.RUN_ID,
+            runUrl: process.env.RUN_URL,
+          };
+          const merged = mergeTargetReports(reports, context);
+          await mkdir(".toolchain/aggregate", { recursive: true });
+          await writeFile(
+            ".toolchain/aggregate/toolchain-validation.json",
+            canonicalValidationJson(merged),
+            "utf8",
+          );
+          validatePublicationReport(merged, context);
+          NODE
+
+      - name: Upload canonical validation report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-validation-report
+          path: .toolchain/aggregate/toolchain-validation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce aggregate result
+        if: ${{ always() }}
+        shell: bash
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.download_reports.outcome }}
+          AGGREGATE_OUTCOME: ${{ steps.aggregate.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "$DOWNLOAD_OUTCOME" == "success" ]]
+          [[ "$AGGREGATE_OUTCOME" == "success" ]]

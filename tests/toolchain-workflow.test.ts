@@ -5,6 +5,10 @@ import test from "node:test";
 const CHECKOUT_SHA = "93cb6efe18208431cddfb8368fd83d5badbf9bfd";
 const SETUP_NODE_SHA = "a0853c24544627f65ddf259abe73b1d18a591444";
 const APP_TOKEN_SHA = "fee1f7d63c2ff003460e3d139729b119787bc349";
+const RUST_TOOLCHAIN_SHA = "4be7066ada62dd38de10e7b70166bc74ed198c30";
+const RUST_CACHE_SHA = "42dc69e1aa15d09112580998cf2ef0119e2e91ae";
+const UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02";
+const DOWNLOAD_ARTIFACT_SHA = "d3f86a106a0bac45b974a628896c90dbdf5c8093";
 
 test("weekly workflow uses a GitHub App and one managed branch", () => {
   const workflow = readFileSync(".github/workflows/toolchain-discover.yml", "utf8");
@@ -45,6 +49,7 @@ test("toolchain automation pins every third-party action to a commit", () => {
   const workflows = [
     readFileSync(".github/workflows/toolchain-discover.yml", "utf8"),
     readFileSync(".github/workflows/toolchain-freshness.yml", "utf8"),
+    readFileSync(".github/workflows/toolchain-validate.yml", "utf8"),
   ];
 
   for (const workflow of workflows) {
@@ -52,6 +57,40 @@ test("toolchain automation pins every third-party action to a commit", () => {
       assert.match(line, /uses:\s+[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[a-f0-9]{40}\s*$/);
     }
   }
+});
+
+test("validation workflow uses native targets with read-only permissions", () => {
+  const workflow = readFileSync(".github/workflows/toolchain-validate.yml", "utf8");
+
+  assert.match(workflow, /contents: read/);
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /workflow_call:/);
+  assert.match(workflow, /windows-latest/);
+  assert.match(workflow, /macos-15-intel/);
+  assert.match(workflow, /macos-15/);
+  assert.match(workflow, /name: toolchain-validation/);
+  assert.match(workflow, /toolchain-validation-report/);
+  assert.match(workflow, /toolchain-mirror-candidates/);
+  assert.match(workflow, new RegExp(`dtolnay/rust-toolchain@${RUST_TOOLCHAIN_SHA}`));
+  assert.match(workflow, new RegExp(`Swatinem/rust-cache@${RUST_CACHE_SHA}`));
+  assert.match(workflow, new RegExp(`actions/upload-artifact@${UPLOAD_ARTIFACT_SHA}`));
+  assert.match(workflow, new RegExp(`actions/download-artifact@${DOWNLOAD_ARTIFACT_SHA}`));
+  assert.doesNotMatch(workflow, /contents: write|pull-requests: write|secrets: inherit/);
+});
+
+test("validation workflow runs baseline first and diagnoses source units", () => {
+  const workflow = readFileSync(".github/workflows/toolchain-validate.yml", "utf8");
+  const baseline = workflow.indexOf("Baseline smoke");
+  const candidate = workflow.indexOf("Candidate smoke");
+
+  assert.ok(baseline >= 0 && candidate > baseline);
+  assert.match(workflow, /Diagnostic yt-dlp/);
+  assert.match(workflow, /Diagnostic Deno/);
+  assert.match(workflow, /Diagnostic FFmpeg/);
+  assert.match(workflow, /baseline_smoke\.outcome == 'success'/);
+  assert.match(workflow, /candidate_smoke\.outcome != 'success'/);
+  assert.match(workflow, /Infrastructure baseline failed/);
 });
 
 test("repository has one toolchain updater", () => {
