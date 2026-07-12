@@ -110,14 +110,14 @@ jobs:
         run: ./scripts/verify-windows-installer.ps1 -ExpectedVersion "${{ steps.identity.outputs.version }}" -ReportPath release-preflight-report.json
 
       - name: Upload preflight installer
-        if: env.PUBLISH_RELEASE != 'true'
+        if: ${{ always() && env.PUBLISH_RELEASE != 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: yt-dlp-tauri-${{ steps.identity.outputs.version }}-${{ steps.identity.outputs.short_sha }}-windows-x64-nsis
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
             release-preflight-report.json
-          if-no-files-found: error
+          if-no-files-found: warn
           compression-level: 0
           retention-days: 14
 

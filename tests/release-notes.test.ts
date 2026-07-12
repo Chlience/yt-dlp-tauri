@@ -84,9 +84,8 @@ test("application release versions stay synchronized", () => {
   const tauriConfig = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
   const cargoToml = readFileSync("src-tauri/Cargo.toml", "utf8");
   const cargoLock = readFileSync("src-tauri/Cargo.lock", "utf8");
-  const cargoPackageVersion = /^\[package\]\s+name = "yt-dlp-tauri"\s+version = "([^"]+)"/mu.exec(
-    cargoToml,
-  )?.[1];
+  const cargoPackageSection = /^\[package\]\s+([\s\S]*?)(?=^\[)/mu.exec(cargoToml)?.[1] ?? "";
+  const cargoPackageVersion = /^version = "([^"]+)"$/mu.exec(cargoPackageSection)?.[1];
   const cargoLockVersion = /\[\[package\]\]\s+name = "yt-dlp-tauri"\s+version = "([^"]+)"/mu.exec(
     cargoLock,
   )?.[1];
