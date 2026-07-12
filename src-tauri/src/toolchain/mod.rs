@@ -5,6 +5,7 @@ mod probe;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    fmt,
     path::{Path, PathBuf},
 };
 
@@ -13,6 +14,77 @@ pub use install::{install_target, InstallTargetRequest, NoopProgressReporter, Pr
 pub use probe::{probe_target, require_tools};
 
 pub const TOOLS_DIRECTORY: &str = "Tools";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ToolchainRevision {
+    date: u32,
+    sequence: u32,
+}
+
+impl ToolchainRevision {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        let (date_text, sequence_text) = value
+            .split_once('.')
+            .ok_or_else(|| format!("Invalid toolchain revision: {value}"))?;
+        validate_yyyymmdd(date_text)?;
+        if sequence_text.is_empty()
+            || sequence_text.starts_with('0')
+            || !sequence_text.bytes().all(|byte| byte.is_ascii_digit())
+        {
+            return Err(format!("Invalid toolchain revision sequence: {value}"));
+        }
+        let sequence = sequence_text
+            .parse::<u32>()
+            .map_err(|_| format!("Invalid toolchain revision sequence: {value}"))?;
+        if sequence == 0 {
+            return Err(format!("Invalid toolchain revision sequence: {value}"));
+        }
+
+        Ok(Self {
+            date: date_text
+                .parse()
+                .map_err(|_| format!("Invalid toolchain revision date: {value}"))?,
+            sequence,
+        })
+    }
+}
+
+impl fmt::Display for ToolchainRevision {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{:08}.{}", self.date, self.sequence)
+    }
+}
+
+fn validate_yyyymmdd(value: &str) -> Result<(), String> {
+    if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(format!("Invalid toolchain revision date: {value}"));
+    }
+
+    let year = value[0..4]
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid toolchain revision date: {value}"))?;
+    let month = value[4..6]
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid toolchain revision date: {value}"))?;
+    let day = value[6..8]
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid toolchain revision date: {value}"))?;
+    if year == 0 || !(1..=12).contains(&month) {
+        return Err(format!("Invalid toolchain revision date: {value}"));
+    }
+    let leap_year = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_in_month = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if day == 0 || day > days_in_month {
+        return Err(format!("Invalid toolchain revision date: {value}"));
+    }
+
+    Ok(())
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolStatus {
@@ -226,6 +298,22 @@ fn tool_paths_from_manifest(root: &Path, target: &ManifestTarget) -> Result<Tool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_and_orders_toolchain_revisions() {
+        let older = ToolchainRevision::parse("20260711.2").unwrap();
+        let newer = ToolchainRevision::parse("20260712.1").unwrap();
+
+        assert!(older < newer);
+        assert_eq!(newer.to_string(), "20260712.1");
+        assert!(ToolchainRevision::parse("20260712.0").is_err());
+        assert!(ToolchainRevision::parse("20260712.01").is_err());
+        assert!(ToolchainRevision::parse("v20260712.1").is_err());
+        assert!(ToolchainRevision::parse("20261301.1").is_err());
+        assert!(ToolchainRevision::parse("20260229.1").is_err());
+        assert!(ToolchainRevision::parse("20240229.1").is_ok());
+        assert!(ToolchainRevision::parse("20260712.1.extra").is_err());
+    }
 
     #[test]
     fn maps_supported_platform_arch_pairs_to_tool_targets() {
