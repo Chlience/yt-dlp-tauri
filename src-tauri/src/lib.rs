@@ -17,15 +17,21 @@ use tauri::{AppHandle, Emitter, Manager};
 pub mod toolchain;
 
 use toolchain::{
-    build_tool_download_client, install_target, manifest_target, parse_manifest, probe_target,
-    require_tools, tool_names_for_target, tool_paths_for_root, tool_target_from,
-    InstallTargetRequest, ManifestTarget, ProgressReporter, ToolInstallProgress, ToolPaths,
-    ToolStatus, ToolsManifest, TOOLS_DIRECTORY,
+    build_tool_download_client, install_target, manifest_target, parse_channel_record,
+    parse_manifest, probe_target, require_tools, select_revision_manifest_asset,
+    tool_names_for_target, tool_paths_for_root, tool_target_from, verify_channel_manifest,
+    GitHubRelease, InstallTargetRequest, ManifestTarget, ProgressReporter, ToolInstallProgress,
+    ToolPaths, ToolStatus, ToolsManifest, TOOLS_DIRECTORY,
 };
 
 const TOOLS_MANIFEST_FILE: &str = "tools-manifest.json";
-const LATEST_RELEASE_API_URL: &str =
+const LEGACY_LATEST_RELEASE_API_URL: &str =
     "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
+const TOOLCHAIN_STABLE_API_URL: &str =
+    "https://api.github.com/repos/Chlience/yt-dlp-tauri-toolchain/releases/tags/toolchain-stable";
+const TOOLCHAIN_RELEASE_API_PREFIX: &str =
+    "https://api.github.com/repos/Chlience/yt-dlp-tauri-toolchain/releases/tags";
+const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_PROXY_URL_PREFIX: &str = "https://gh-proxy.com/";
 const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
@@ -82,6 +88,8 @@ struct DownloadProgress {
 struct LatestToolManifestResult {
     status: String,
     manifest_json: Option<String>,
+    revision: Option<String>,
+    source: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -596,19 +604,17 @@ fn fetch_latest_tool_manifest_blocking(
     github_access_mode: &str,
 ) -> Result<LatestToolManifestResult, String> {
     let client = build_tool_download_client("tool manifest")?;
-    let release_url = resolve_github_url_for_mode(LATEST_RELEASE_API_URL, github_access_mode);
+    let stable_url = resolve_github_url_for_mode(TOOLCHAIN_STABLE_API_URL, github_access_mode);
     let release_response = client
-        .get(&release_url)
+        .get(&stable_url)
         .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
         .send()
-        .map_err(|error| format!("Failed to fetch latest release from {release_url}: {error}"))?;
+        .map_err(|error| format!("Failed to fetch stable toolchain from {stable_url}: {error}"))?;
     let release_status = release_response.status();
 
-    if release_status.as_u16() == 404 {
-        return Ok(LatestToolManifestResult {
-            status: "no_release".to_string(),
-            manifest_json: None,
-        });
+    if should_use_legacy_tool_manifest(release_status) {
+        return fetch_legacy_tool_manifest(&client, github_access_mode);
     }
 
     if !release_status.is_success() {
@@ -618,6 +624,108 @@ fn fetch_latest_tool_manifest_blocking(
 
     let release_body = release_response
         .text()
+        .map_err(|error| format!("Failed to read stable toolchain response: {error}"))?;
+    let stable_release: GitHubRelease = serde_json::from_str(&release_body)
+        .map_err(|error| format!("Failed to parse stable toolchain response: {error}"))?;
+    let channel = parse_channel_record(stable_release.body.as_deref().unwrap_or(""))?;
+
+    let revision_api_url = format!("{TOOLCHAIN_RELEASE_API_PREFIX}/{}", channel.release_tag);
+    let revision_url = resolve_github_url_for_mode(&revision_api_url, github_access_mode);
+    let revision_response = client
+        .get(&revision_url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .send()
+        .map_err(|error| {
+            format!(
+                "Failed to fetch toolchain revision {} from {revision_url}: {error}",
+                channel.revision
+            )
+        })?;
+    let revision_status = revision_response.status();
+    if !revision_status.is_success() {
+        let body = revision_response.text().unwrap_or_default();
+        return Err(github_http_error_message(revision_status, &body));
+    }
+    let revision_body = revision_response
+        .text()
+        .map_err(|error| format!("Failed to read toolchain revision response: {error}"))?;
+    let revision_release: GitHubRelease = serde_json::from_str(&revision_body)
+        .map_err(|error| format!("Failed to parse toolchain revision response: {error}"))?;
+    let manifest_asset = select_revision_manifest_asset(&revision_release, &channel)?;
+
+    let manifest_url =
+        resolve_github_url_for_mode(&manifest_asset.browser_download_url, github_access_mode);
+    let manifest_response = client
+        .get(&manifest_url)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|error| {
+            format!(
+                "Failed to fetch {} from {manifest_url}: {error}",
+                channel.manifest
+            )
+        })?;
+    let manifest_status = manifest_response.status();
+    if !manifest_status.is_success() {
+        let body = manifest_response.text().unwrap_or_default();
+        return Err(github_http_error_message(manifest_status, &body));
+    }
+
+    let manifest_bytes = manifest_response
+        .bytes()
+        .map_err(|error| format!("Failed to read {}: {error}", channel.manifest))?;
+    if manifest_bytes.len() as u64 != manifest_asset.size {
+        return Err(format!(
+            "{} size mismatch: expected {} bytes, received {}",
+            channel.manifest,
+            manifest_asset.size,
+            manifest_bytes.len()
+        ));
+    }
+    verify_channel_manifest(&channel, &manifest_bytes)?;
+    let manifest_json = String::from_utf8(manifest_bytes.to_vec())
+        .map_err(|error| format!("{} is not valid UTF-8: {error}", channel.manifest))?;
+
+    Ok(LatestToolManifestResult {
+        status: "available".to_string(),
+        manifest_json: Some(manifest_json),
+        revision: Some(channel.revision),
+        source: Some("archive".to_string()),
+    })
+}
+
+fn should_use_legacy_tool_manifest(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::NOT_FOUND
+}
+
+fn fetch_legacy_tool_manifest(
+    client: &reqwest::blocking::Client,
+    github_access_mode: &str,
+) -> Result<LatestToolManifestResult, String> {
+    let release_url =
+        resolve_github_url_for_mode(LEGACY_LATEST_RELEASE_API_URL, github_access_mode);
+    let release_response = client
+        .get(&release_url)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", GITHUB_API_VERSION)
+        .send()
+        .map_err(|error| format!("Failed to fetch latest release from {release_url}: {error}"))?;
+    let release_status = release_response.status();
+    if release_status.as_u16() == 404 {
+        return Ok(LatestToolManifestResult {
+            status: "no_release".to_string(),
+            manifest_json: None,
+            revision: None,
+            source: None,
+        });
+    }
+    if !release_status.is_success() {
+        let body = release_response.text().unwrap_or_default();
+        return Err(github_http_error_message(release_status, &body));
+    }
+    let release_body = release_response
+        .text()
         .map_err(|error| format!("Failed to read latest release response: {error}"))?;
     let release_payload: Value = serde_json::from_str(&release_body)
         .map_err(|error| format!("Failed to parse latest release response: {error}"))?;
@@ -625,6 +733,8 @@ fn fetch_latest_tool_manifest_blocking(
         return Ok(LatestToolManifestResult {
             status: "no_manifest".to_string(),
             manifest_json: None,
+            revision: None,
+            source: None,
         });
     };
 
@@ -641,14 +751,16 @@ fn fetch_latest_tool_manifest_blocking(
         let body = manifest_response.text().unwrap_or_default();
         return Err(github_http_error_message(manifest_status, &body));
     }
-
     let manifest_json = manifest_response
         .text()
         .map_err(|error| format!("Failed to read {TOOLS_MANIFEST_FILE}: {error}"))?;
+    let manifest = manifest_from_json(&manifest_json)?;
 
     Ok(LatestToolManifestResult {
         status: "available".to_string(),
         manifest_json: Some(manifest_json),
+        revision: manifest.revision,
+        source: Some("legacy".to_string()),
     })
 }
 
@@ -1660,6 +1772,19 @@ mod tests {
             github_http_error_message(reqwest::StatusCode::NOT_FOUND, ""),
             "404 Not Found"
         );
+    }
+
+    #[test]
+    fn legacy_tool_manifest_is_used_only_when_stable_channel_is_absent() {
+        assert!(should_use_legacy_tool_manifest(
+            reqwest::StatusCode::NOT_FOUND
+        ));
+        assert!(!should_use_legacy_tool_manifest(
+            reqwest::StatusCode::FORBIDDEN
+        ));
+        assert!(!should_use_legacy_tool_manifest(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        ));
     }
 
     #[test]

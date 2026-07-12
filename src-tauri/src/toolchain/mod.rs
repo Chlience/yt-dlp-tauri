@@ -1,4 +1,5 @@
 mod archive;
+mod channel;
 mod install;
 mod probe;
 
@@ -9,6 +10,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub(crate) use channel::{
+    parse_channel_record, select_revision_manifest_asset, sha256_bytes, verify_channel_manifest,
+    GitHubRelease,
+};
 pub(crate) use install::build_tool_download_client;
 pub use install::{install_target, InstallTargetRequest, NoopProgressReporter, ProgressReporter};
 pub use probe::{probe_target, require_tools};
