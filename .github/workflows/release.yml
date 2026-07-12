@@ -6,16 +6,28 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Branch, commit, or tag to build in preflight mode"
+        required: false
+        default: main
+        type: string
+      publish:
+        description: "Build or update a draft release for an existing v* tag"
+        required: false
+        default: false
+        type: boolean
       tag:
-        description: "Existing release tag to build, for example v0.1.2"
-        required: true
+        description: "Existing release tag; required only when publish is enabled"
+        required: false
         type: string
 
 permissions:
   contents: write
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
+  BUILD_REF: ${{ github.event_name == 'push' && github.ref || (inputs.publish && inputs.tag || inputs.ref) }}
+  PUBLISH_RELEASE: ${{ github.event_name == 'push' || inputs.publish }}
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
 jobs:
   build-release:
@@ -34,7 +46,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          ref: ${{ env.BUILD_REF }}
+          persist-credentials: ${{ env.PUBLISH_RELEASE == 'true' }}
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -57,6 +70,24 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Verify release identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          commit_sha="$(git rev-parse HEAD)"
+          if [ "${PUBLISH_RELEASE}" = "true" ] && [ "${RELEASE_TAG}" != "v${version}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG:-<empty>} must match package version v${version}"
+            exit 1
+          fi
+          node .github/scripts/extract-release-notes.mjs \
+            --version "v${version}" \
+            --output release-notes.md > /dev/null
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+          printf 'commit_sha=%s\n' "$commit_sha" >> "$GITHUB_OUTPUT"
+          printf 'short_sha=%s\n' "${commit_sha:0:12}" >> "$GITHUB_OUTPUT"
+
       - name: Test frontend
         run: npm test
 
@@ -64,16 +95,39 @@ jobs:
         run: npm run build
 
       - name: Test Rust backend
-        run: cargo test --manifest-path ./src-tauri/Cargo.toml --lib
+        run: cargo test --manifest-path ./src-tauri/Cargo.toml --lib --bins --tests
 
       - name: Check Rust backend
-        run: cargo check --manifest-path ./src-tauri/Cargo.toml
+        run: cargo check --manifest-path ./src-tauri/Cargo.toml --all-targets
+
+      - name: Build preflight installer
+        if: env.PUBLISH_RELEASE != 'true'
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Verify clean installer lifecycle
+        if: env.PUBLISH_RELEASE != 'true'
+        shell: pwsh
+        run: ./scripts/verify-windows-installer.ps1 -ExpectedVersion "${{ steps.identity.outputs.version }}" -ReportPath release-preflight-report.json
+
+      - name: Upload preflight installer
+        if: env.PUBLISH_RELEASE != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: yt-dlp-tauri-${{ steps.identity.outputs.version }}-${{ steps.identity.outputs.short_sha }}-windows-x64-nsis
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            release-preflight-report.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
       - name: Prepare release notes
+        if: env.PUBLISH_RELEASE == 'true'
         id: release-notes
         run: node .github/scripts/extract-release-notes.mjs --version "${{ env.RELEASE_TAG }}" --output release-notes.md
 
       - name: Build and draft release
+        if: env.PUBLISH_RELEASE == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -91,12 +145,13 @@ jobs:
     name: Tool manifest
     runs-on: ubuntu-latest
     needs: build-release
+    if: ${{ github.event_name == 'push' || inputs.publish }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
+          ref: ${{ env.BUILD_REF }}
 
       - name: Upload tool manifest
         env:

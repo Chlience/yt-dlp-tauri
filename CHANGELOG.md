@@ -4,17 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.1.12 - 2026-07-12
+
 ### 中文
 
-- 新增 yt-dlp manifest 更新机器人 workflow，上游发布新版本后可自动更新工具清单、测试 fixture、Windows 恢复脚本和 changelog，并创建维护 PR。
-- 将应用管理的 `yt-dlp` 更新到 `2026.07.04`，减少站点 extractor 过期导致的解析失败。
-- Toolchain Freshness 自动任务检查 yt-dlp 最新 release 时会使用 GitHub Actions token 认证请求，避免 GitHub API 未认证限流导致定时任务失败。
+- 工具更新改用项目托管的不可变归档和独立 stable channel，应用无需发版即可获得经过验证的 yt-dlp、Deno、FFmpeg 和 FFprobe revision。
+- 完整工具链会先下载到 staging revision，完成来源、归档、可执行文件哈希和兼容性检查后再原子激活；失败更新会保留当前可用 revision。
+- Settings 会显示当前激活的工具链 revision；应用保留对 v0.1.11 平铺工具目录和 release manifest 的迁移兼容，首次成功激活 revision 后自动使用新的目录布局。
+- 新增统一的工具发现、Freshness、原生兼容性验证、归档发布、Canary 和回滚流程，工具更新继续经过维护者 PR 审核。
+- 将应用管理的 `yt-dlp` 更新到 `2026.07.04`，并对 GitHub API 请求使用认证，减少 extractor 过期和定时任务限流导致的失败。
+- 应用安装包和受管工具链聚焦 Windows 10/11 x64，发布产物为 NSIS 安装包。
 
 ### English
 
-- Added a yt-dlp manifest update bot workflow that refreshes the tool manifest, test fixture, Windows restore script, and changelog before opening a maintenance PR.
-- Updated the app-managed `yt-dlp` to `2026.07.04` to reduce parsing failures caused by stale site extractors.
-- Toolchain Freshness now authenticates latest yt-dlp release checks with the GitHub Actions token to avoid scheduled failures from unauthenticated GitHub API rate limits.
+- Moved tool updates to a project-controlled immutable archive and independent stable channel so validated yt-dlp, Deno, FFmpeg, and FFprobe revisions can ship without an application release.
+- Staged complete toolchain revisions before atomically activating them after source, archive, executable hash, and compatibility checks; failed updates preserve the current working revision.
+- Displayed the active toolchain revision in Settings and preserved migration compatibility with v0.1.11 flat tool directories and its release manifest, switching layouts after the first successful activation.
+- Added unified discovery, freshness, native compatibility validation, archive publication, Canary, and rollback workflows while keeping tool updates behind maintainer-reviewed pull requests.
+- Updated the app-managed `yt-dlp` to `2026.07.04` and authenticated GitHub API requests to reduce failures from stale extractors and scheduled rate limits.
+- Focused application packaging and the managed toolchain on Windows 10/11 x64 with an NSIS installer.
 
 ## 0.1.11 - 2026-06-24
 
