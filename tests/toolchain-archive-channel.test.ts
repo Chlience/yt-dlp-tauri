@@ -4,7 +4,11 @@ import test from "node:test";
 
 import {
   ArchiveChannelError,
+  downloadVerifiedHistoricalReleaseAsset,
+  downloadVerifiedReleaseAsset,
+  fetchHistoricalToolchainRevisionRelease,
   fetchStableToolchainManifest,
+  fetchToolchainRevisionRelease,
   verifyArchiveManifestBytes,
 } from "../scripts/toolchain/archive-channel.mjs";
 
@@ -117,6 +121,58 @@ test("archive channel rejects a mutable revision release", async () => {
       error instanceof ArchiveChannelError &&
       error.failureClass === "archive-integrity",
   );
+});
+
+test("historical rollback accepts an immutable prerelease without weakening stable consumers", async () => {
+  const value = fixture();
+  const release = {
+    tag_name: value.releaseTag,
+    draft: false,
+    prerelease: true,
+    immutable: true,
+    assets: [value.asset],
+  };
+  const fetchImpl = async () => jsonResponse(release);
+
+  await assert.rejects(
+    fetchToolchainRevisionRelease({ revision: value.revision, fetchImpl }),
+    (error: unknown) =>
+      error instanceof ArchiveChannelError &&
+      error.failureClass === "archive-integrity",
+  );
+  const historical = await fetchHistoricalToolchainRevisionRelease({
+    revision: value.revision,
+    fetchImpl,
+  });
+  await assert.rejects(
+    downloadVerifiedReleaseAsset({
+      release: historical,
+      name: value.manifestName,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => value.manifestBytes,
+      }),
+    }),
+    (error: unknown) =>
+      error instanceof ArchiveChannelError &&
+      error.failureClass === "archive-integrity",
+  );
+  const downloaded = await downloadVerifiedHistoricalReleaseAsset({
+    release: historical,
+    name: value.manifestName,
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => value.manifestBytes,
+    }),
+  });
+
+  assert.equal(historical.tag_name, value.releaseTag);
+  assert.equal(historical.prerelease, true);
+  assert.equal(historical.immutable, true);
+  assert.deepEqual(downloaded.bytes, value.manifestBytes);
+  assert.equal(downloaded.sha256, value.channel.sha256);
 });
 
 test("archive channel rejects source releases newer than the channel", () => {

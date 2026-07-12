@@ -213,6 +213,8 @@ test("rollback revalidates historical revisions unless a protected environment a
   assert.match(validation, /tools-manifest-\$\{rollbackRevision\}\.json/u);
   assert.match(validation, /toolchain-validation-\$\{rollbackRevision\}\.json/u);
   assert.match(validation, /historical-validation\.json/u);
+  assert.match(validation, /fetchHistoricalToolchainRevisionRelease/u);
+  assert.match(validation, /downloadVerifiedHistoricalReleaseAsset/u);
 });
 
 test("validation workflow uses native targets with read-only permissions", () => {

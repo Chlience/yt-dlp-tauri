@@ -240,8 +240,8 @@ jobs:
           import { execFileSync } from "node:child_process";
           import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
           import {
-            downloadVerifiedReleaseAsset,
-            fetchToolchainRevisionRelease,
+            downloadVerifiedHistoricalReleaseAsset,
+            fetchHistoricalToolchainRevisionRelease,
             verifyArchiveManifestBytes,
           } from "./scripts/toolchain/archive-channel.mjs";
           import { generateManifest } from "./scripts/toolchain/generate-manifest.mjs";
@@ -279,7 +279,7 @@ jobs:
               throw new Error(`Invalid rollback revision: ${rollbackRevision}`);
             }
             const releaseTag = `toolchain-${rollbackRevision}`;
-            const release = await fetchToolchainRevisionRelease({
+            const release = await fetchHistoricalToolchainRevisionRelease({
               revision: rollbackRevision,
               token: process.env.GH_TOKEN,
               repository: process.env.ARCHIVE_REPOSITORY,
@@ -289,7 +289,7 @@ jobs:
               throw new Error(`Historical archive release ${releaseTag} is not immutable`);
             }
             const downloadAsset = async (name) => {
-              return downloadVerifiedReleaseAsset({
+              return downloadVerifiedHistoricalReleaseAsset({
                 release,
                 name,
                 token: process.env.GH_TOKEN,
@@ -742,8 +742,8 @@ jobs:
           import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
           import { join } from "node:path";
           import {
-            downloadVerifiedReleaseAsset,
-            fetchToolchainRevisionRelease,
+            downloadVerifiedHistoricalReleaseAsset,
+            fetchHistoricalToolchainRevisionRelease,
             verifyArchiveManifestBytes,
           } from "./scripts/toolchain/archive-channel.mjs";
           import {
@@ -764,7 +764,7 @@ jobs:
           let context;
           if (rollbackRevision) {
             const releaseTag = `toolchain-${rollbackRevision}`;
-            const release = await fetchToolchainRevisionRelease({
+            const release = await fetchHistoricalToolchainRevisionRelease({
               revision: rollbackRevision,
               token: process.env.GH_TOKEN,
               repository: process.env.ARCHIVE_REPOSITORY,
@@ -774,7 +774,7 @@ jobs:
               throw new Error(`Historical archive release ${releaseTag} is not immutable`);
             }
             const downloadAsset = async (name) => {
-              return downloadVerifiedReleaseAsset({
+              return downloadVerifiedHistoricalReleaseAsset({
                 release,
                 name,
                 token: process.env.GH_TOKEN,

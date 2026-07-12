@@ -100,13 +100,24 @@ export async function fetchStableToolchainManifest({
   };
 }
 
-export async function fetchToolchainRevisionRelease({
-  revision,
-  token = "",
-  fetchImpl = globalThis.fetch,
-  repository = ARCHIVE_REPOSITORY,
-  userAgent = "yt-dlp-tauri-toolchain-consumer",
-}) {
+export async function fetchToolchainRevisionRelease(options) {
+  return fetchRevisionRelease(options, false);
+}
+
+export async function fetchHistoricalToolchainRevisionRelease(options) {
+  return fetchRevisionRelease(options, true);
+}
+
+async function fetchRevisionRelease(
+  {
+    revision,
+    token = "",
+    fetchImpl = globalThis.fetch,
+    repository = ARCHIVE_REPOSITORY,
+    userAgent = "yt-dlp-tauri-toolchain-consumer",
+  },
+  allowPrerelease,
+) {
   requireArchiveRepository(repository);
   requireRevision(revision);
   const releaseTag = `toolchain-${revision}`;
@@ -128,27 +139,42 @@ export async function fetchToolchainRevisionRelease({
   if (
     release.tag_name !== releaseTag ||
     release.draft !== false ||
-    release.prerelease === true ||
+    (allowPrerelease
+      ? typeof release.prerelease !== "boolean"
+      : release.prerelease !== false) ||
     release.immutable !== true ||
     !Array.isArray(release.assets)
   ) {
     throw integrityError(
-      `Archive revision ${releaseTag} must be published and immutable`,
+      allowPrerelease
+        ? `Historical archive revision ${releaseTag} must be published and immutable`
+        : `Archive revision ${releaseTag} must be a published normal immutable release`,
     );
   }
   return release;
 }
 
-export async function downloadVerifiedReleaseAsset({
-  release,
-  name,
-  token = "",
-  fetchImpl = globalThis.fetch,
-  repository = ARCHIVE_REPOSITORY,
-  userAgent = "yt-dlp-tauri-toolchain-consumer",
-}) {
+export async function downloadVerifiedReleaseAsset(options) {
+  return downloadVerifiedAsset(options, false);
+}
+
+export async function downloadVerifiedHistoricalReleaseAsset(options) {
+  return downloadVerifiedAsset(options, true);
+}
+
+async function downloadVerifiedAsset(
+  {
+    release,
+    name,
+    token = "",
+    fetchImpl = globalThis.fetch,
+    repository = ARCHIVE_REPOSITORY,
+    userAgent = "yt-dlp-tauri-toolchain-consumer",
+  },
+  allowPrerelease,
+) {
   requireArchiveRepository(repository);
-  const releaseTag = requireImmutableRelease(release);
+  const releaseTag = requireImmutableRelease(release, allowPrerelease);
   const matches = release.assets.filter((asset) => asset?.name === name);
   if (matches.length !== 1) {
     throw integrityError(
@@ -254,16 +280,22 @@ export function verifyArchiveManifestBytes(channel, bytes) {
   return manifest;
 }
 
-function requireImmutableRelease(release) {
+function requireImmutableRelease(release, allowPrerelease) {
   if (
     !release ||
     typeof release.tag_name !== "string" ||
     release.draft !== false ||
-    release.prerelease === true ||
+    (allowPrerelease
+      ? typeof release.prerelease !== "boolean"
+      : release.prerelease !== false) ||
     release.immutable !== true ||
     !Array.isArray(release.assets)
   ) {
-    throw integrityError("Archive release must be published and immutable");
+    throw integrityError(
+      allowPrerelease
+        ? "Historical archive release must be published and immutable"
+        : "Archive release must be a published normal immutable release",
+    );
   }
   return release.tag_name;
 }
