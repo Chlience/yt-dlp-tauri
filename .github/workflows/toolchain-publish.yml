@@ -76,7 +76,7 @@ jobs:
         run: node scripts/resolve-toolchain-artifact.mjs
 
       - name: Download exact candidate artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ steps.resolve.outputs.candidate_artifact_name }}
           path: .toolchain/candidate
@@ -85,7 +85,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Download exact pull request validation report
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ steps.resolve.outputs.validation_artifact_name }}
           path: .toolchain/pr-validation
@@ -142,7 +142,7 @@ jobs:
 
       - name: Upload verified candidate to main run
         id: relay
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.resolve.outputs.candidate_artifact_name }}
           path: .toolchain/candidate
@@ -151,7 +151,7 @@ jobs:
           retention-days: 7
 
       - name: Upload artifact handoff report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: toolchain-artifact-handoff-${{ steps.resolve.outputs.revision }}
           path: .toolchain/handoff/handoff-report.json
@@ -217,21 +217,21 @@ jobs:
 
       - name: Download canonical validation report
         if: ${{ !inputs.skip_revalidation }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: toolchain-validation-report
           path: .toolchain/validation
 
       - name: Download verified main candidate
         if: ${{ inputs.rollback_revision == '' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ needs.handoff.outputs.candidate_artifact_name }}
           path: .toolchain/candidate
 
       - name: Download artifact handoff report
         if: ${{ inputs.rollback_revision == '' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: toolchain-artifact-handoff-${{ needs.handoff.outputs.revision }}
           path: .toolchain/handoff

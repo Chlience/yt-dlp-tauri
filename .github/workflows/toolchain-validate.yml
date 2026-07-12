@@ -155,7 +155,7 @@ jobs:
       - name: Upload candidate bundle
         id: upload
         if: ${{ inputs.rollback_revision == '' && inputs.candidate_artifact_name == '' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ steps.context.outputs.artifact_name }}
           path: .toolchain/candidate
@@ -204,7 +204,7 @@ jobs:
 
       - name: Download candidate bundle
         if: ${{ inputs.rollback_revision == '' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: ${{ needs.prepare-candidate.outputs.artifact_name }}
           path: .toolchain/candidate
@@ -688,7 +688,7 @@ jobs:
 
       - name: Upload target report
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: toolchain-target-${{ matrix.target }}
           path: .toolchain/target-reports/${{ matrix.target }}.json
@@ -714,7 +714,7 @@ jobs:
       - name: Download target reports
         id: download_reports
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           pattern: toolchain-target-*
           path: .toolchain/downloaded-reports
@@ -849,7 +849,7 @@ jobs:
 
       - name: Upload canonical validation report
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: toolchain-validation-report
           path: .toolchain/aggregate/toolchain-validation.json

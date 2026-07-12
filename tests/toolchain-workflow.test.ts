@@ -7,8 +7,8 @@ const SETUP_NODE_SHA = "a0853c24544627f65ddf259abe73b1d18a591444";
 const APP_TOKEN_SHA = "fee1f7d63c2ff003460e3d139729b119787bc349";
 const RUST_TOOLCHAIN_SHA = "4be7066ada62dd38de10e7b70166bc74ed198c30";
 const RUST_CACHE_SHA = "42dc69e1aa15d09112580998cf2ef0119e2e91ae";
-const UPLOAD_ARTIFACT_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02";
-const DOWNLOAD_ARTIFACT_SHA = "d3f86a106a0bac45b974a628896c90dbdf5c8093";
+const UPLOAD_ARTIFACT_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a";
+const DOWNLOAD_ARTIFACT_SHA = "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c";
 
 test("weekly workflow uses a GitHub App and one managed branch", () => {
   const workflow = readFileSync(".github/workflows/toolchain-discover.yml", "utf8");
