@@ -646,7 +646,7 @@ git commit -m "feat: diagnose stale toolchain sources" -m "feat: 诊断失效工
 - Modify: `tests/toolchain-workflow.test.ts`
 
 **Interfaces:**
-- Consumes repository secrets `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY`
+- Consumes repository secrets `TOOLCHAIN_BOT_CLIENT_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY`
 - Produces branches `bot/toolchain-weekly` and `bot/toolchain-emergency-{source-id}`
 
 - [ ] **Step 1: Replace workflow tests with failing contract assertions**
@@ -818,7 +818,7 @@ git commit -m "chore: resolve the first unified toolchain revision" -m "chore: �
 
 Run: `gh secret list --repo Chlience/yt-dlp-tauri`
 
-Expected: names include `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY`.
+Expected: names include `TOOLCHAIN_BOT_CLIENT_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY`.
 
 - [ ] **Step 2: Dispatch weekly discovery**
 

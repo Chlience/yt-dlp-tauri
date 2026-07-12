@@ -465,7 +465,7 @@ The first archive revision must pass on Windows x64:
   immutable after its first post-enable update.
 - Enable release immutability for future archive releases.
 - Install the toolchain GitHub App on both repositories.
-- Configure `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` in the main
+- Configure `TOOLCHAIN_BOT_CLIENT_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` in the main
   repository.
 - Review and check in redistribution evidence requirements for every source unit.
 

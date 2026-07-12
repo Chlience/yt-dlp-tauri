@@ -458,7 +458,7 @@ Before any real workflow dispatch, all of these must be confirmed manually:
 - Mutable `toolchain-stable` prerelease was created before immutability was enabled.
 - Release immutability is enabled for future releases.
 - GitHub App is installed on both repositories with archive Contents write, Metadata read, and Administration read.
-- Main repository secrets `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` exist.
+- Main repository secrets `TOOLCHAIN_BOT_CLIENT_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` exist.
 - Redistribution evidence for every source unit passed maintainer review.
 
 The implementation may run dry plans and fixture integration tests before this gate. It must not create a real draft, upload a real asset, publish a revision, or change the stable channel before all six checks pass.

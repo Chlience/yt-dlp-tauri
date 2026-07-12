@@ -21,7 +21,7 @@ test("weekly workflow uses a GitHub App and one managed branch", () => {
     workflow,
     new RegExp(`actions/create-github-app-token@${APP_TOKEN_SHA}`),
   );
-  assert.match(workflow, /TOOLCHAIN_BOT_APP_ID/);
+  assert.match(workflow, /TOOLCHAIN_BOT_CLIENT_ID/);
   assert.match(workflow, /TOOLCHAIN_BOT_PRIVATE_KEY/);
   assert.match(workflow, /bot\/toolchain-weekly/);
   assert.match(workflow, /node scripts\/update-toolchain\.mjs/);
@@ -111,7 +111,7 @@ test("publisher scopes App authentication and gates every archive mutation", () 
   assert.match(workflow, new RegExp(`actions/create-github-app-token@${APP_TOKEN_SHA}`));
   assert.match(workflow, /owner:\s*Chlience/u);
   assert.match(workflow, /repositories:\s*yt-dlp-tauri-toolchain/u);
-  assert.match(workflow, /TOOLCHAIN_BOT_APP_ID/u);
+  assert.match(workflow, /TOOLCHAIN_BOT_CLIENT_ID/u);
   assert.match(workflow, /TOOLCHAIN_BOT_PRIVATE_KEY/u);
   assert.match(workflow, /repos\/\$\{ARCHIVE_REPOSITORY\}\/immutable-releases/u);
   assert.match(workflow, /X-GitHub-Api-Version:\s*2026-03-10/u);
