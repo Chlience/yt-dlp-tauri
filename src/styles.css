@@ -826,6 +826,23 @@ progress::-webkit-progress-value {
   overflow-wrap: anywhere;
 }
 
+.toolchain-revision {
+  display: flex;
+  min-height: 20px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.toolchain-revision code {
+  color: var(--text);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 .events li {
   border-bottom: 1px solid color-mix(in oklch, var(--stroke), transparent 40%);
   padding-bottom: 8px;

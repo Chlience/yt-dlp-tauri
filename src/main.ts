@@ -162,6 +162,8 @@ const translations = {
     "settings.resolvingFolder": "Resolving download folder...",
     "settings.toolchain": "Toolchain",
     "settings.toolchainHint": "Per-target tools are verified with SHA-256.",
+    "settings.activeRevision": "Active revision",
+    "settings.noActiveRevision": "None",
     "settings.resolvingTools": "Resolving tools path...",
     "settings.installMissing": "Install missing tools automatically.",
     "settings.installingTools": "Installing missing tools...",
@@ -300,6 +302,8 @@ const translations = {
     "settings.resolvingFolder": "正在解析下载目录...",
     "settings.toolchain": "工具链",
     "settings.toolchainHint": "按目标平台安装，并用 SHA-256 校验。",
+    "settings.activeRevision": "当前 revision",
+    "settings.noActiveRevision": "未激活",
     "settings.resolvingTools": "正在解析工具路径...",
     "settings.installMissing": "可自动安装缺失工具。",
     "settings.installingTools": "正在安装缺失工具...",
@@ -417,6 +421,7 @@ const elements = {
   folderText: must<HTMLElement>("#folder-text"),
   cookiesFile: must<HTMLElement>("#cookies-file"),
   toolRoot: must<HTMLElement>("#tool-root"),
+  toolchainRevision: must<HTMLElement>("#toolchain-revision"),
   toolList: must<HTMLElement>("#tool-list"),
   toolInstallStatus: must<HTMLElement>("#tool-install-status"),
   title: must<HTMLElement>("#video-title"),
@@ -508,6 +513,7 @@ function applyTranslations() {
     renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
   }
   renderCookiesFile(state.cookiesFile);
+  renderToolchainRevision();
   updateGithubAccessButtons();
   updateToolActionButton();
   if (state.releaseNotesOpen) {
@@ -681,6 +687,7 @@ async function loadAppState() {
   elements.folderInput.value = appState.download_directory;
   elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
   state.toolchainRevision = appState.toolchain_revision ?? null;
+  renderToolchainRevision();
   renderCookiesFile(appState.cookies_file ?? null);
 }
 
@@ -1186,6 +1193,11 @@ function renderTools(tools: ToolStatus[]) {
       return row;
     }),
   );
+}
+
+function renderToolchainRevision() {
+  elements.toolchainRevision.textContent =
+    state.toolchainRevision ?? t("settings.noActiveRevision");
 }
 
 function applyToolSummary(

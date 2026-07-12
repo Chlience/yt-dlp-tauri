@@ -68,8 +68,33 @@ test("extractReleaseNotes requires bilingual release sections", () => {
 });
 
 test("production changelog release notes are bilingual", () => {
-  const releaseNotes = extractReleaseNotes(readFileSync("CHANGELOG.md", "utf8"), "v0.1.4");
+  const packageVersion = JSON.parse(readFileSync("package.json", "utf8")).version;
+  const releaseNotes = extractReleaseNotes(
+    readFileSync("CHANGELOG.md", "utf8"),
+    `v${packageVersion}`,
+  );
 
   assert.match(releaseNotes, /^### 中文$/m);
   assert.match(releaseNotes, /^### English$/m);
+});
+
+test("application release versions stay synchronized", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
+  const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  const tauriConfig = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8"));
+  const cargoToml = readFileSync("src-tauri/Cargo.toml", "utf8");
+  const cargoLock = readFileSync("src-tauri/Cargo.lock", "utf8");
+  const cargoPackageVersion = /^\[package\]\s+name = "yt-dlp-tauri"\s+version = "([^"]+)"/mu.exec(
+    cargoToml,
+  )?.[1];
+  const cargoLockVersion = /\[\[package\]\]\s+name = "yt-dlp-tauri"\s+version = "([^"]+)"/mu.exec(
+    cargoLock,
+  )?.[1];
+
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/u);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[""].version, packageJson.version);
+  assert.equal(tauriConfig.version, packageJson.version);
+  assert.equal(cargoPackageVersion, packageJson.version);
+  assert.equal(cargoLockVersion, packageJson.version);
 });

@@ -37,8 +37,9 @@
 - 通过 `yt-dlp` 解析视频信息，并预览标题、封面、时长、来源 URL、描述和清晰度选项。
 - 下载时显示实时进度、速度、ETA，支持取消，并保存输出目录。
 - 为需要登录态的站点选择 Cookie 文件，支持 Netscape `cookies.txt` 和一行浏览器 Cookie 请求头。
-- 在 Settings 中安装、修复和校验应用管理的平台工具链。
-- 按固定 source URL 和 SHA-256 哈希校验工具，来源记录在 pinned manifest 中。
+- 在 Settings 中安装、更新、重新安装和校验应用管理的完整工具链 revision。
+- 从项目托管的不可变 GitHub Release 资产解析 stable 工具链。
+- 完整 staging 并校验所有工具后再原子激活，更新失败时保留当前可用 revision。
 - 支持中英文界面切换。
 - 检查 GitHub Releases 中的应用更新，并可为更新检查和 release 链接启用 `gh-proxy`。
 - 写入本地运行日志，方便查看最近的应用事件。
@@ -102,8 +103,8 @@ src-tauri\target\release\bundle\nsis\
 | 项 | 用途 |
 | --- | --- |
 | `toolchain-policy.json` | 经审核的上游来源、版本选择规则、target 和允许访问的 host。 |
-| `toolchain-lock.json` | 自动生成的不可变 release 元数据，以及归档和可执行文件 SHA-256。 |
-| `src-tauri/tools-manifest.json` | 自动生成的运行时工具版本、固定来源 URL、target 和可执行文件哈希。 |
+| `toolchain-lock.json` | 自动生成的上游身份、不可变归档描述，以及归档和可执行文件 SHA-256。 |
+| `src-tauri/tools-manifest.json` | 自动生成的运行时 revision、项目托管归档 URL、target 和可执行文件哈希。 |
 | `TOOLCHAIN_CHANGELOG.md` | 独立于应用 release 的工具版本历史。 |
 | `src-tauri/tauri.conf.json` | Tauri 应用元信息、固定窗口尺寸、bundle target、图标和资源。 |
 | `scripts/download-tools.ps1` | 可选开发脚本，把 pinned `win-x64` 工具链还原到 checkout 中。 |
@@ -118,6 +119,8 @@ src-tauri\target\release\bundle\nsis\
 ## 工具链维护
 
 `Toolchain Discovery` workflow 每周解析一次 yt-dlp、Deno、FFmpeg 和 FFprobe，并维护一个经人工审核的 `bot/toolchain-weekly` PR。`Toolchain Freshness` 每天检查已发布的来源 URL，并为失效来源创建独立的紧急 PR。所有变更都需要维护者审核后合并。
+
+工具链变更合并后会先通过原生验证，再发布到独立的 `yt-dlp-tauri-toolchain` 归档仓库。应用跟随 `toolchain-stable` 通道，`TOOLCHAIN_CHANGELOG.md` 独立记录工具 revision，不要求应用同步发版。
 
 可以在本地只查看统一解析结果，不修改文件：
 
@@ -142,11 +145,14 @@ GITHUB_TOKEN="$(gh auth token)" node scripts/update-toolchain.mjs --dry-run
 %LOCALAPPDATA%\yt-dlp-tauri\logs\app.log
 ```
 
-安装后的应用会把工具写入：
+安装后的应用会把工具链 revision 写入：
 
 ```text
-%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\
+%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\active.json
+%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\revisions\<revision>\
 ```
+
+首次成功激活 revision 前，应用仍可读取 v0.1.11 的平铺工具目录。
 
 开发 checkout 工具可以位于：
 
@@ -214,11 +220,12 @@ npm run tauri build
 发布 release 前：
 
 1. 运行上面的验证命令。
-2. 推送版本 tag，例如 `v0.1.3`。
-3. 等待 `Release` workflow 把 Windows x64 NSIS 安装包和 `tools-manifest.json` 上传到 draft GitHub Release。
-4. 确认 `src-tauri/tools-manifest.json` 使用固定 release URL，不使用 `latest`。
-5. 确认生成目录和还原出来的工具没有被 staged。
-6. 随 release 保留 GPL 许可证和第三方声明。
+2. 对准确的 release commit 以 preflight 模式运行 `Release` workflow，并验证干净安装产物。
+3. 推送版本 tag，例如 `v0.1.12`。
+4. 等待 `Release` workflow 把 Windows x64 NSIS 安装包和 `tools-manifest.json` 上传到 draft GitHub Release。
+5. 确认 `src-tauri/tools-manifest.json` 使用固定 release URL，不使用 `latest`。
+6. 确认生成目录和还原出来的工具没有被 staged。
+7. 随 release 保留 GPL 许可证和第三方声明。
 
 ## 法律说明
 

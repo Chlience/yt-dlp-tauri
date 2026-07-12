@@ -37,8 +37,9 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Parse video metadata through `yt-dlp` and preview title, thumbnail, duration, source URL, description, and quality options.
 - Download with live progress, speed, ETA, cancellation, and a saved output folder.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
-- Install, update, reinstall, and verify the app-managed platform toolchain from Settings.
-- Verify tools against fixed source URLs and SHA-256 hashes from a pinned manifest.
+- Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
+- Resolve the stable toolchain from project-controlled immutable GitHub Release assets.
+- Stage and verify every tool before atomic activation, preserving the active revision when an update fails.
 - Switch the UI between English and Chinese.
 - Check GitHub Releases for app updates, with optional `gh-proxy` routing for update and release access.
 - Keep local operational logs for recent app activity.
@@ -102,8 +103,8 @@ src-tauri\target\release\bundle\nsis\
 | Item | Purpose |
 | --- | --- |
 | `toolchain-policy.json` | Reviewed upstream sources, version-selection rules, targets, and allowed hosts. |
-| `toolchain-lock.json` | Generated immutable release metadata and archive/executable SHA-256 hashes. |
-| `src-tauri/tools-manifest.json` | Generated runtime tool versions, fixed source URLs, target names, and executable hashes. |
+| `toolchain-lock.json` | Generated upstream identity, immutable archive descriptors, and archive/executable SHA-256 hashes. |
+| `src-tauri/tools-manifest.json` | Generated runtime revision, project-controlled archive URLs, target names, and executable hashes. |
 | `TOOLCHAIN_CHANGELOG.md` | Tool-only revision history, independent from application releases. |
 | `src-tauri/tauri.conf.json` | Tauri app metadata, fixed window size, bundle target, icons, and resources. |
 | `scripts/download-tools.ps1` | Optional development script that restores the pinned `win-x64` toolchain into the checkout. |
@@ -118,6 +119,8 @@ Current release scope:
 ## Toolchain Maintenance
 
 The `Toolchain Discovery` workflow resolves yt-dlp, Deno, FFmpeg, and FFprobe once per week and maintains one reviewed `bot/toolchain-weekly` pull request. `Toolchain Freshness` checks released source URLs daily and opens a focused emergency pull request for an affected source. Both workflows require human review before merge.
+
+Merged toolchain changes pass native validation before publication to the separate `yt-dlp-tauri-toolchain` archive. The app follows the `toolchain-stable` channel, while `TOOLCHAIN_CHANGELOG.md` records revisions independently from application releases.
 
 The unified resolver can be inspected locally without changing files:
 
@@ -142,11 +145,14 @@ App state and logs are stored under:
 %LOCALAPPDATA%\yt-dlp-tauri\logs\app.log
 ```
 
-Installed app tools are written under:
+Installed app toolchain revisions are written under:
 
 ```text
-%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\
+%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\active.json
+%LOCALAPPDATA%\yt-dlp-tauri\Tools\win-x64\revisions\<revision>\
 ```
+
+The v0.1.11 flat tool directory remains readable until the first revision is successfully activated.
 
 Development checkout tools can live at:
 
@@ -214,11 +220,12 @@ npm run tauri build
 Before publishing a release:
 
 1. Run the verification commands above.
-2. Push a version tag such as `v0.1.3`.
-3. Wait for the `Release` workflow to upload the Windows x64 NSIS installer and `tools-manifest.json` to the draft GitHub Release.
-4. Confirm `src-tauri/tools-manifest.json` uses fixed release URLs, not `latest`.
-5. Confirm generated folders and restored tools are not staged.
-6. Include the GPL license and third-party notices with the release.
+2. Run the `Release` workflow in preflight mode against the exact release commit and verify its clean-install artifact.
+3. Push a version tag such as `v0.1.12`.
+4. Wait for the `Release` workflow to upload the Windows x64 NSIS installer and `tools-manifest.json` to the draft GitHub Release.
+5. Confirm `src-tauri/tools-manifest.json` uses fixed release URLs, not `latest`.
+6. Confirm generated folders and restored tools are not staged.
+7. Include the GPL license and third-party notices with the release.
 
 ## Legal
 
