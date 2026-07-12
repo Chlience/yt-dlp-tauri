@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   assertAudioVideoStreams,
   ffmpegDashCommand,
+  runCommand,
   runCompatibilitySuite,
   startMediaServer,
   ytDlpDashCommand,
@@ -66,6 +67,19 @@ test("FFprobe requires one audio and one video stream", () => {
   assert.throws(
     () => assertAudioVideoStreams({ streams: [{ codec_type: "video" }] }),
     /audio stream/,
+  );
+});
+
+test("command failures prefer error lines over warnings", async () => {
+  await assert.rejects(
+    runCommand({
+      command: process.execPath,
+      args: [
+        "-e",
+        "console.error('WARNING: fallback'); console.error('ERROR: root cause'); process.exit(1)",
+      ],
+    }),
+    /ERROR: root cause/u,
   );
 });
 

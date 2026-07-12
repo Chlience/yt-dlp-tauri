@@ -304,7 +304,7 @@ export function runCommand(
       };
       if (code === 0) finish(undefined, result);
       else {
-        const detail = firstOutputLine(result.stderr) ?? firstOutputLine(result.stdout);
+        const detail = preferredOutputLine(result.stderr, result.stdout);
         finish(
           new Error(
             `${basename(command)} exited with code ${code ?? "unknown"}${
@@ -368,11 +368,14 @@ function mediaContentType(path) {
   return "application/octet-stream";
 }
 
-function firstOutputLine(value) {
-  return value
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .find(Boolean);
+function preferredOutputLine(...values) {
+  const lines = values.flatMap((value) =>
+    value
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  return lines.find((line) => /(?:^|\s)ERROR:/iu.test(line)) ?? lines[0];
 }
 
 function parseCliArguments(argumentsList) {
