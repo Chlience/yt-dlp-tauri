@@ -5,11 +5,13 @@ import test from "node:test";
 import {
   ArchiveChannelError,
   fetchStableToolchainManifest,
+  verifyArchiveManifestBytes,
 } from "../scripts/toolchain/archive-channel.mjs";
 
-function fixture() {
-  const revision = "20260712.1";
+function fixture(sourceRevision = "20260712.1") {
+  const revision = "20260712.2";
   const releaseTag = `toolchain-${revision}`;
+  const sourceReleaseTag = `toolchain-${sourceRevision}`;
   const manifestName = `tools-manifest-${revision}.json`;
   const manifestBytes = Buffer.from(
     JSON.stringify({
@@ -21,7 +23,7 @@ function fixture() {
           tools: [
             {
               name: "yt-dlp",
-              sourceUrl: `https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/${releaseTag}/yt-dlp.exe`,
+              sourceUrl: `https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/${sourceReleaseTag}/yt-dlp.exe`,
               sourceSize: 4,
               sourceSha256: "b".repeat(64),
               sha256: "c".repeat(64),
@@ -114,5 +116,14 @@ test("archive channel rejects a mutable revision release", async () => {
     (error: unknown) =>
       error instanceof ArchiveChannelError &&
       error.failureClass === "archive-integrity",
+  );
+});
+
+test("archive channel rejects source releases newer than the channel", () => {
+  const value = fixture("20260713.1");
+
+  assert.throws(
+    () => verifyArchiveManifestBytes(value.channel, value.manifestBytes),
+    /invalid runtime bytes/iu,
   );
 });

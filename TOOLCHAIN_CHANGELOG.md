@@ -2,6 +2,11 @@
 
 Tool updates are published independently from application releases
 
+## 20260712.2 - 2026-07-12
+
+- Recovered the stable channel with a normal immutable revision release
+- Reused the validated `20260712.1` binary assets without duplicating bytes
+
 ## 20260712.1 - 2026-07-12
 
 - `deno`: `v2.9.2` archive metadata added

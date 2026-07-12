@@ -229,7 +229,7 @@ function normalizeImmutableRelease(value, expectedTag, label) {
   if (
     release.tag_name !== expectedTag ||
     release.draft !== false ||
-    release.prerelease !== true ||
+    typeof release.prerelease !== "boolean" ||
     release.immutable !== true
   ) {
     throw new Error(`${label} must be the exact published immutable historical release ${expectedTag}`);
@@ -246,25 +246,49 @@ function normalizeImmutableRelease(value, expectedTag, label) {
   return { ...release, id, assets };
 }
 
-function normalizeRevisionDraft(value, expectedTag) {
+function normalizeRevisionRelease(value, expectedTag) {
   const release = requireObject(value, "Archive revision release");
   requireRepository(
     release.repository,
     ARCHIVE_REPOSITORY,
     "Archive revision release repository",
   );
-  if (
-    release.tag_name !== expectedTag ||
-    release.draft !== true ||
-    release.prerelease !== true ||
-    release.immutable !== false
-  ) {
-    throw new Error(`Archive revision release ${expectedTag} must be a resumable draft`);
+  if (release.tag_name !== expectedTag) {
+    throw new Error(`Archive revision release must use ${expectedTag}`);
   }
+  const state =
+    release.draft === true &&
+    release.prerelease === false &&
+    release.immutable === false
+      ? "draft"
+      : release.draft === false &&
+          release.prerelease === false &&
+          release.immutable === true
+        ? "published"
+        : null;
+  if (!state) {
+    throw new Error(
+      `Archive revision release ${expectedTag} must be a resumable draft or normal immutable publication`,
+    );
+  }
+  const assets =
+    state === "published"
+      ? requireArray(release.assets, "Archive revision release assets").map((asset) =>
+          normalizeReleaseAsset(
+            asset,
+            expectedTag,
+            ARCHIVE_REPOSITORY,
+            "Archive revision release asset",
+          ),
+        )
+      : [];
   return {
-    id: requireIdentifier(release.id, "Archive revision draft ID"),
-    name: requireString(release.name, "Archive revision draft name"),
+    state,
+    id: requireIdentifier(release.id, "Archive revision release ID"),
+    tag_name: expectedTag,
+    name: requireString(release.name, "Archive revision release name"),
     body: typeof release.body === "string" ? release.body : "",
+    assets,
   };
 }
 
@@ -300,9 +324,9 @@ function requireStableRelease(value) {
     release.tag_name !== "toolchain-stable" ||
     release.draft !== false ||
     release.prerelease !== true ||
-    release.immutable !== false
+    release.immutable !== true
   ) {
-    throw new Error("Archive stable release must be the published mutable prerelease");
+    throw new Error("Archive stable release must be the published immutable channel");
   }
   return {
     ...release,
@@ -505,10 +529,10 @@ export function createArchivePublicationPlan(inputValue) {
   const revision = requireRevision(input.revision);
   const commitSha = requireCommit(input.commitSha, "Publication commit");
   const proposedTag = archiveReleaseTag(revision);
-  const revisionDraft =
+  const revisionRelease =
     input.revisionRelease === null || input.revisionRelease === undefined
       ? null
-      : normalizeRevisionDraft(input.revisionRelease, proposedTag);
+      : normalizeRevisionRelease(input.revisionRelease, proposedTag);
   const lockDescriptor = requireObject(input.lock, "Toolchain lock descriptor");
   const lockSha256 = requireSha256(lockDescriptor.sha256, "Toolchain lock SHA-256");
   const lock = requireObject(lockDescriptor.value, "Toolchain lock content");
@@ -589,7 +613,7 @@ export function createArchivePublicationPlan(inputValue) {
   });
   const stableRelease = requireStableRelease(input.stableRelease);
   const promoted = currentChannel(stableRelease);
-  if (promoted && compareToolchainRevisions(revision, promoted.revision) <= 0) {
+  if (promoted && compareToolchainRevisions(revision, promoted.revision) < 0) {
     throw new Error(
       `Toolchain revision ${revision} must be newer than the promoted revision ${promoted.revision}`,
     );
@@ -603,6 +627,13 @@ export function createArchivePublicationPlan(inputValue) {
     manifest: manifest.name,
     sha256: manifest.sha256,
   };
+  if (
+    promoted &&
+    compareToolchainRevisions(revision, promoted.revision) === 0 &&
+    JSON.stringify(promoted) !== JSON.stringify(channel)
+  ) {
+    throw new Error(`Toolchain revision ${revision} is already promoted with another channel`);
+  }
   const metadataOperations = metadata.map((item) => ({
     kind: "metadata",
     category: item.category,
@@ -625,7 +656,7 @@ export function createArchivePublicationPlan(inputValue) {
   const draftRelease = {
     tag: proposedTag,
     name: `Toolchain ${revision}`,
-    prerelease: true,
+    prerelease: false,
     makeLatest: false,
     body: releaseNotes({
       revision,
@@ -635,13 +666,25 @@ export function createArchivePublicationPlan(inputValue) {
       manifestSha256: manifest.sha256,
       changedSources: input.changedSources,
     }),
-    existingId: revisionDraft?.id ?? null,
+    existingId: revisionRelease?.state === "draft" ? revisionRelease.id : null,
   };
   if (
-    revisionDraft &&
-    (revisionDraft.name !== draftRelease.name || revisionDraft.body !== draftRelease.body)
+    revisionRelease &&
+    (revisionRelease.name !== draftRelease.name || revisionRelease.body !== draftRelease.body)
   ) {
-    throw new Error(`Archive revision draft ${proposedTag} does not match this publication`);
+    throw new Error(`Archive revision release ${proposedTag} does not match this publication`);
+  }
+  if (revisionRelease?.state === "published") {
+    if (revisionRelease.assets.length !== requiredDraftAssets.length) {
+      throw new Error(`Archive revision release ${proposedTag} has unexpected assets`);
+    }
+    for (const descriptor of requiredDraftAssets) {
+      exactReleaseAsset(
+        revisionRelease,
+        descriptor,
+        `Archive revision asset ${descriptor.name}`,
+      );
+    }
   }
 
   return {
@@ -653,6 +696,7 @@ export function createArchivePublicationPlan(inputValue) {
     releaseTag: proposedTag,
     commitSha,
     pullRequestNumber: handoff.pullRequestNumber,
+    revisionState: revisionRelease?.state ?? "missing",
     draftRelease,
     operations: [
       ...reuse,

@@ -138,15 +138,21 @@ const context = {
   headSha: "a".repeat(40),
 };
 
-test("production revision contains three unique candidate byte objects", () => {
+test("production candidate bytes match current revision archive descriptors", () => {
   const lock = JSON.parse(readFileSync("toolchain-lock.json", "utf8"));
   const assets = candidateAssetsForRevision(lock);
+  const references = lock.sources.flatMap((source) =>
+    source.assets.filter(
+      (asset) => asset.archive.releaseTag === `toolchain-${lock.revision}`,
+    ),
+  );
+  const uniqueDigests = new Set(references.map((asset) => asset.sha256));
 
-  assert.equal(assets.length, 3);
-  assert.equal(new Set(assets.map((entry) => entry.sha256)).size, 3);
+  assert.equal(assets.length, uniqueDigests.size);
+  assert.equal(new Set(assets.map((entry) => entry.sha256)).size, uniqueDigests.size);
   assert.equal(
     assets.reduce((count, entry) => count + entry.references.length, 0),
-    3,
+    references.length,
   );
 });
 
@@ -183,6 +189,36 @@ test("candidate preparation downloads each digest once and writes a canonical in
       expectedContext: context,
     });
     assert.deepEqual(verified, index);
+  });
+});
+
+test("candidate preparation supports metadata-only revisions across artifact round trips", async () => {
+  await withTempDirectory(async (directory) => {
+    const { lock, policy } = fixture();
+    lock.revision = "20260712.2";
+    const lockBytes = Buffer.from(`${JSON.stringify(lock, null, 2)}\n`);
+    const index = await prepareCandidateBundle({
+      policy,
+      lock,
+      lockBytes,
+      outputDirectory: directory,
+      fetchImpl: async () => {
+        throw new Error("Metadata-only revisions must not download candidate bytes");
+      },
+      context,
+      now: new Date("2026-07-12T13:48:31.000Z"),
+    });
+
+    assert.deepEqual(index.assets, []);
+    await rm(join(directory, "assets"), { recursive: true, force: true });
+    await assert.doesNotReject(() =>
+      verifyCandidateBundle({
+        lock,
+        lockBytes,
+        directory,
+        expectedContext: context,
+      }),
+    );
   });
 });
 

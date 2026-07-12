@@ -16,8 +16,9 @@ Pull-request validation downloads each unique upstream asset once, verifies it,
 and preserves the exact bytes as a short-lived Actions artifact. Validation on the
 merged `main` commit consumes and revalidates the same bytes. The publisher then
 uploads those bytes to a draft release in the archive repository, verifies every
-uploaded asset, publishes the release as immutable, advances the mutable
-`toolchain-stable` channel, and refreshes the legacy compatibility manifest.
+uploaded asset, publishes the release as immutable, advances the
+`toolchain-stable` channel record through editable release notes, and refreshes the
+legacy compatibility manifest.
 
 The runtime never depends on an upstream release URL after a toolchain revision is
 published.
@@ -29,7 +30,7 @@ published.
 | Archive scope | yt-dlp, Deno, FFmpeg, and FFprobe for Windows x64 |
 | Storage | GitHub Release assets in a separate public repository |
 | Immutable unit | One `toolchain-<revision>` release per toolchain revision |
-| Stable pointer | One pre-existing mutable `toolchain-stable` prerelease |
+| Stable pointer | One pre-existing immutable `toolchain-stable` prerelease with editable notes |
 | Byte custody | Preserve PR-validated bytes through main validation and publication |
 | Deduplication | Reuse archive descriptors for unchanged assets |
 | Source repository | Store only policy, lock, manifest, hashes, and provenance metadata |
@@ -77,7 +78,7 @@ The main repository does not retain tool binaries in Git history.
 
 `Chlience/yt-dlp-tauri-toolchain` owns:
 
-- The mutable `toolchain-stable` channel release.
+- The immutable `toolchain-stable` channel release and its editable notes.
 - Immutable revision releases.
 - Tool archives and standalone executables.
 - Immutable manifests and validation reports.
@@ -98,16 +99,17 @@ Bootstrap the archive repository in this order:
 3. Enable release immutability in the archive repository settings.
 4. Install the publishing GitHub App on the archive repository.
 5. Publish the first immutable toolchain revision.
-6. Update the existing mutable channel body to promote that revision.
+6. Update the existing channel body to promote that revision.
 
-The bootstrap release remains mutable while later revision releases become
-immutable.
+GitHub may lock the bootstrap release when its notes are updated after repository
+immutability is enabled. Its tag and assets remain immutable while its title and
+release notes remain editable, so the channel record continues to advance safely.
 
 ### Immutable Revision Release
 
 Each revision uses a tag such as `toolchain-20260712.1`. The publisher:
 
-1. Creates a draft prerelease with `latest=false`.
+1. Creates a normal draft release with `latest=false`.
 2. Uploads every newly archived tool asset.
 3. Uploads the revision manifest, validation report, and compliance materials.
 4. Downloads every draft asset through the authenticated API and verifies size and
@@ -286,7 +288,7 @@ repository. Required archive permissions are:
 The main repository `GITHUB_TOKEN` remains read-only for validation. After
 exact-main validation succeeds, the publisher performs local prerequisite checks,
 creates the repository-scoped App token, and uses it for read-only remote gates.
-No archive mutation begins until the repository, mutable channel, and immutable
+No archive mutation begins until the repository, immutable channel, and immutable
 release setting all pass those gates.
 
 The publication plan lists every asset as one of:
@@ -344,7 +346,7 @@ this migration because it would prevent that asset replacement.
 Rollback loads the historical immutable revision release and validation report from
 the archive repository. It verifies every referenced archive asset and digest, reruns
 native compatibility unless a protected bypass is approved, and changes only the
-mutable channel record.
+channel record in the stable release notes.
 
 Rollback never copies or overwrites historical assets.
 
@@ -430,9 +432,9 @@ The first archive revision must pass on Windows x64:
 2. Add archive descriptors, deterministic naming, and policy validation.
 3. Add candidate bundle preparation and local-asset native validation.
 4. Add exact PR artifact resolution for main validation.
-5. Create and bootstrap the archive repository and mutable stable channel.
+5. Create and bootstrap the archive repository and stable channel.
 6. Enable archive-repository release immutability and install the GitHub App.
-7. Add immutable draft publication for every source unit.
+7. Add verified draft publication to a normal immutable release for every source unit.
 8. Change the client channel and manifest source to the archive repository.
 9. Retain and verify the v0.1.11 compatibility publication path.
 10. Publish and exercise the first archived revision before releasing the migrated
@@ -459,7 +461,8 @@ The first archive revision must pass on Windows x64:
 ## Operational Prerequisites
 
 - Create `Chlience/yt-dlp-tauri-toolchain` as a public repository.
-- Bootstrap `toolchain-stable` before enabling release immutability.
+- Bootstrap `toolchain-stable` before enabling release immutability; treat it as
+  immutable after its first post-enable update.
 - Enable release immutability for future archive releases.
 - Install the toolchain GitHub App on both repositories.
 - Configure `TOOLCHAIN_BOT_APP_ID` and `TOOLCHAIN_BOT_PRIVATE_KEY` in the main

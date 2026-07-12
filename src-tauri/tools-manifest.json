@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "revision": "20260712.1",
-  "retrievedAtUtc": "2026-07-12T00:00:00.000Z",
+  "revision": "20260712.2",
+  "retrievedAtUtc": "2026-07-12T13:48:31.000Z",
   "targets": [
     {
       "target": "win-x64",

@@ -324,9 +324,6 @@ export async function prepareCandidateBundle({
   }
 
   const assets = candidateAssetsForRevision(lock);
-  if (assets.length === 0) {
-    throw new Error(`Toolchain revision ${lock.revision} has no candidate byte objects`);
-  }
   const normalizedContext = normalizeContext(context);
   const index = {
     schemaVersion: INDEX_SCHEMA_VERSION,
@@ -456,11 +453,19 @@ export async function verifyCandidateBundle({
       throw new Error(`Found unexpected candidate bundle entry: ${entry.name}`);
     }
   }
-  if (rootEntries.length !== 2) {
+  const hasAssetsDirectory = rootEntries.some(
+    (entry) => entry.name === "assets" && entry.isDirectory(),
+  );
+  if (
+    rootEntries.length !== (hasAssetsDirectory ? 2 : 1) ||
+    (expectedAssets.length > 0 && !hasAssetsDirectory)
+  ) {
     throw new Error("Candidate bundle root has missing or extra entries");
   }
 
-  const assetEntries = await readdir(join(directory, "assets"), { withFileTypes: true });
+  const assetEntries = hasAssetsDirectory
+    ? await readdir(join(directory, "assets"), { withFileTypes: true })
+    : [];
   const expectedNames = new Set(expectedAssets.map((entry) => entry.sha256));
   for (const entry of assetEntries) {
     if (!entry.isFile() || entry.isSymbolicLink() || !expectedNames.has(entry.name)) {

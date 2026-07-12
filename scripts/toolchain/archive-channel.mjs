@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 
-import { parseChannelRecord, selectManifestAsset } from "./channel.mjs";
+import {
+  compareToolchainRevisions,
+  parseChannelRecord,
+  selectManifestAsset,
+} from "./channel.mjs";
 
 export const ARCHIVE_REPOSITORY = "Chlience/yt-dlp-tauri-toolchain";
 export const GITHUB_API_VERSION = "2026-03-10";
@@ -199,8 +203,7 @@ export function verifyArchiveManifestBytes(channel, bytes) {
       "Archive manifest schema or revision does not match the stable channel",
     );
   }
-  const sourcePrefix = `https://github.com/${channel.repository}/releases/download/${channel.releaseTag}/`;
-  const sourcePathPrefix = `/${channel.repository}/releases/download/${channel.releaseTag}/`;
+  const sourcePathPrefix = `/${channel.repository}/releases/download/`;
   for (const target of manifest.targets) {
     if (typeof target?.target !== "string" || !Array.isArray(target.tools)) {
       throw integrityError("Archive manifest contains an invalid target");
@@ -212,9 +215,20 @@ export function verifyArchiveManifestBytes(channel, bytes) {
       } catch {
         sourceUrl = null;
       }
-      const assetName = sourceUrl?.pathname.startsWith(sourcePathPrefix)
+      const sourcePath = sourceUrl?.pathname.startsWith(sourcePathPrefix)
         ? sourceUrl.pathname.slice(sourcePathPrefix.length)
         : "";
+      const separator = sourcePath.indexOf("/");
+      const sourceReleaseTag = separator > 0 ? sourcePath.slice(0, separator) : "";
+      const assetName = separator > 0 ? sourcePath.slice(separator + 1) : "";
+      const sourceRevision = sourceReleaseTag.startsWith("toolchain-")
+        ? sourceReleaseTag.slice("toolchain-".length)
+        : "";
+      let validSourceRevision = false;
+      try {
+        validSourceRevision =
+          compareToolchainRevisions(sourceRevision, channel.revision) <= 0;
+      } catch {}
       if (
         !sourceUrl ||
         sourceUrl.protocol !== "https:" ||
@@ -223,7 +237,7 @@ export function verifyArchiveManifestBytes(channel, bytes) {
         sourceUrl.password ||
         sourceUrl.search ||
         sourceUrl.hash ||
-        !tool.sourceUrl.startsWith(sourcePrefix) ||
+        !validSourceRevision ||
         !assetName ||
         assetName.includes("/") ||
         !Number.isSafeInteger(tool.sourceSize) ||

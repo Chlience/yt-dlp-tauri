@@ -272,7 +272,7 @@ function publicationFixture(overrides = {}) {
       tag_name: "toolchain-stable",
       draft: false,
       prerelease: true,
-      immutable: false,
+      immutable: true,
       body: renderChannelRecord("# Stable toolchain\n", currentChannel),
     },
     applicationRelease: {
@@ -318,6 +318,38 @@ test("publication reuses historical descriptors and uploads proposed descriptors
   assert.equal(plan.operations.at(-1)?.applicationReleaseTag, "v0.1.11");
 });
 
+test("publication supports a metadata-only revision with historical tool bytes", () => {
+  const fixture = publicationFixture();
+  const reused = descriptor(
+    `toolchain-${historicalRevision}`,
+    `yt-dlp-${historicalRevision}-${proposedByteSha256.slice(0, 16)}.exe`,
+    200,
+    proposedByteSha256,
+  );
+  fixture.lock.value.sources[1].assets[0].archive = reused;
+  fixture.candidateFiles = [];
+  fixture.historicalReleases[0].assets.push(
+    releaseAsset(
+      reused.releaseTag,
+      reused.assetName,
+      reused.size,
+      reused.sha256,
+      502,
+    ),
+  );
+  fixture.changedSources = [];
+
+  const plan = createArchivePublicationPlan(fixture);
+  const release = plan.operations.find(
+    (operation) => operation.kind === "publish-release",
+  );
+
+  assert.equal(plan.operations.filter((operation) => operation.kind === "reuse").length, 2);
+  assert.equal(plan.operations.some((operation) => operation.kind === "upload"), false);
+  assert.equal(release.requiredDraftAssets.length, fixture.metadata.length);
+  assert.equal(plan.draftRelease.body.includes("Changed sources: none"), true);
+});
+
 test("publication resumes only an exact mutable revision draft", () => {
   const initialPlan = createArchivePublicationPlan(publicationFixture());
   const revisionDraft = {
@@ -327,7 +359,7 @@ test("publication resumes only an exact mutable revision draft", () => {
     name: initialPlan.draftRelease.name,
     body: initialPlan.draftRelease.body,
     draft: true,
-    prerelease: true,
+    prerelease: false,
     immutable: false,
     assets: [],
   };
@@ -336,6 +368,7 @@ test("publication resumes only an exact mutable revision draft", () => {
   );
 
   assert.equal(resumed.draftRelease.existingId, "404");
+  assert.equal(resumed.revisionState, "draft");
 
   assert.throws(
     () =>
@@ -344,16 +377,54 @@ test("publication resumes only an exact mutable revision draft", () => {
           revisionRelease: { ...revisionDraft, body: `${revisionDraft.body}\nstale` },
         }),
       ),
-    /draft.*does not match/iu,
+    /release.*does not match/iu,
   );
   assert.throws(
     () =>
       createArchivePublicationPlan(
         publicationFixture({
-          revisionRelease: { ...revisionDraft, draft: false, immutable: true },
+          revisionRelease: { ...revisionDraft, draft: false, immutable: false },
         }),
       ),
     /resumable draft/iu,
+  );
+});
+
+test("publication resumes after an exact immutable revision was published", () => {
+  const initialPlan = createArchivePublicationPlan(publicationFixture());
+  const expected = initialPlan.operations.find(
+    (operation) => operation.kind === "publish-release",
+  ).requiredDraftAssets;
+  const revisionRelease = {
+    repository: archiveRepository,
+    id: 405,
+    tag_name: `toolchain-${revision}`,
+    name: initialPlan.draftRelease.name,
+    body: initialPlan.draftRelease.body,
+    draft: false,
+    prerelease: false,
+    immutable: true,
+    assets: expected.map((asset, index) =>
+      releaseAsset(
+        `toolchain-${revision}`,
+        asset.name,
+        asset.size,
+        asset.sha256,
+        700 + index,
+      ),
+    ),
+  };
+  const resumed = createArchivePublicationPlan(
+    publicationFixture({ revisionRelease }),
+  );
+
+  assert.equal(resumed.revisionState, "published");
+  assert.equal(resumed.draftRelease.existingId, null);
+
+  revisionRelease.assets[0].digest = `sha256:${"9".repeat(64)}`;
+  assert.throws(
+    () => createArchivePublicationPlan(publicationFixture({ revisionRelease })),
+    /revision.*asset.*digest/iu,
   );
 });
 
@@ -375,6 +446,10 @@ test("publication reuses only exact immutable historical assets", () => {
   const wrongDigest = publicationFixture();
   wrongDigest.historicalReleases[0].assets[0].digest = `sha256:${"8".repeat(64)}`;
   assert.throws(() => createArchivePublicationPlan(wrongDigest), /digest/u);
+
+  const normalRelease = publicationFixture();
+  normalRelease.historicalReleases[0].prerelease = false;
+  assert.doesNotThrow(() => createArchivePublicationPlan(normalRelease));
 });
 
 test("publication validates main report, metadata completeness, and channel order", () => {
@@ -482,7 +557,7 @@ function rollbackFixture(overrides = {}) {
       tag_name: "toolchain-stable",
       draft: false,
       prerelease: true,
-      immutable: false,
+      immutable: true,
       body: renderChannelRecord("# Stable toolchain\n", currentChannel),
     },
     applicationRelease: {

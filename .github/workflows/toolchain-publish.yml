@@ -309,7 +309,7 @@ jobs:
             .tag_name == "toolchain-stable" and
             .draft == false and
             .prerelease == true and
-            .immutable == false
+            .immutable == true
           ' .toolchain/remote/stable-release.json > /dev/null
           jq -e '.enabled == true' \
             .toolchain/remote/immutable-releases.json > /dev/null
@@ -339,13 +339,20 @@ jobs:
               throw new Error(`Archive revision release ${tag} is ambiguous`);
             }
             const revisionRelease = matches[0] ?? null;
-            if (
-              revisionRelease &&
-              (revisionRelease.draft !== true ||
-                revisionRelease.prerelease !== true ||
-                revisionRelease.immutable !== false)
-            ) {
-              throw new Error(`Archive revision release ${tag} is not a resumable draft`);
+            if (revisionRelease) {
+              const resumableDraft =
+                revisionRelease.draft === true &&
+                revisionRelease.prerelease === false &&
+                revisionRelease.immutable === false;
+              const immutablePublication =
+                revisionRelease.draft === false &&
+                revisionRelease.prerelease === false &&
+                revisionRelease.immutable === true;
+              if (!resumableDraft && !immutablePublication) {
+                throw new Error(
+                  `Archive revision release ${tag} cannot resume publication`,
+                );
+              }
             }
             await writeFile(
               ".toolchain/remote/revision-release.json",
@@ -356,7 +363,6 @@ jobs:
             (release) =>
               /^toolchain-[0-9]{8}\.[1-9][0-9]*$/u.test(release.tag_name) &&
               release.draft === false &&
-              release.prerelease === true &&
               release.immutable === true,
           );
           await writeFile(
@@ -519,6 +525,7 @@ jobs:
               `mode=${plan.mode}`,
               `revision=${plan.revision}`,
               `release_tag=${plan.releaseTag ?? ""}`,
+              `revision_state=${plan.revisionState ?? ""}`,
               `dry_run=${plan.dryRun ?? false}`,
             ].join("\n") + "\n",
           );
@@ -526,7 +533,7 @@ jobs:
 
       - name: Create immutable revision draft
         id: revision_draft
-        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' && steps.publication_plan.outputs.revision_state != 'published' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
@@ -546,7 +553,6 @@ jobs:
             gh release create "$RELEASE_TAG" \
               --repo "$ARCHIVE_REPOSITORY" \
               --draft \
-              --prerelease \
               --latest=false \
               --title "Toolchain ${{ steps.publication_plan.outputs.revision }}" \
               --notes-file .toolchain/publication/release-notes.md
@@ -563,7 +569,7 @@ jobs:
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
       - name: Upload planned draft assets
-        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' && steps.publication_plan.outputs.revision_state != 'published' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
@@ -582,7 +588,7 @@ jobs:
             .toolchain/publication/draft-upload-plan.json)
 
       - name: Verify every draft asset
-        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' && steps.publication_plan.outputs.revision_state != 'published' }}
         env:
           ARCHIVE_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_ID: ${{ steps.revision_draft.outputs.release_id }}
@@ -605,7 +611,7 @@ jobs:
           if (
             release.tag_name !== plan.releaseTag ||
             release.draft !== true ||
-            release.prerelease !== true ||
+            release.prerelease !== false ||
             release.immutable !== false
           ) {
             throw new Error("Revision draft identity is invalid");
@@ -646,7 +652,7 @@ jobs:
           NODE
 
       - name: Publish immutable revision
-        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' && steps.publication_plan.outputs.revision_state != 'published' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_ID: ${{ steps.revision_draft.outputs.release_id }}
@@ -657,7 +663,7 @@ jobs:
           import { writeFile } from "node:fs/promises";
           await writeFile(
             ".toolchain/publication/publish-release.json",
-            `${JSON.stringify({ draft: false, prerelease: true, make_latest: "false" })}\n`,
+            `${JSON.stringify({ draft: false, prerelease: false, make_latest: "false" })}\n`,
           );
           NODE
           gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
@@ -681,7 +687,11 @@ jobs:
             ".toolchain/publication/immutable-release.json",
             "utf8",
           ));
-          if (release.draft !== false || release.immutable !== true) {
+          if (
+            release.draft !== false ||
+            release.prerelease !== false ||
+            release.immutable !== true
+          ) {
             throw new Error("Published revision release is not immutable");
           }
           NODE
@@ -731,7 +741,7 @@ jobs:
           const expected = plan.operations.find((item) => item.kind === "promote-channel");
           if (
             String(release.id) !== expected.releaseId ||
-            release.immutable !== false ||
+            release.immutable !== true ||
             JSON.stringify(parseChannelRecord(release.body)) !== JSON.stringify(expected.channel)
           ) {
             throw new Error("Promoted archive channel differs from the publication plan");
@@ -774,7 +784,7 @@ jobs:
           const expected = plan.operations.find((item) => item.kind === "promote-channel");
           if (
             String(release.id) !== expected.releaseId ||
-            release.immutable !== false ||
+            release.immutable !== true ||
             JSON.stringify(parseChannelRecord(release.body)) !== JSON.stringify(expected.channel)
           ) {
             throw new Error("Promoted rollback channel differs from the validated plan");

@@ -83,7 +83,6 @@ test("publisher validates exact main before promoting immutable assets", () => {
   assert.match(workflow, /node scripts\/publish-toolchain\.mjs[\s\\]+--input/u);
   assert.match(workflow, /Chlience\/yt-dlp-tauri-toolchain/u);
   assert.match(workflow, /toolchain-stable/u);
-  assert.match(workflow, /--prerelease/u);
   assert.match(workflow, /releases\/latest/u);
   assert.match(
     workflow,
@@ -118,7 +117,7 @@ test("publisher scopes App authentication and gates every archive mutation", () 
   assert.match(workflow, /X-GitHub-Api-Version:\s*2026-03-10/u);
   assert.match(workflow, /\.enabled == true/u);
   assert.match(workflow, /\.visibility == "public"/u);
-  assert.match(workflow, /\.immutable == false/u);
+  assert.match(workflow, /\.immutable == true/u);
 
   const localGate = workflow.indexOf("Check local publication prerequisites");
   const token = workflow.indexOf("Create archive publisher token");
@@ -131,7 +130,11 @@ test("publisher verifies draft bytes and immutable release attestation before pr
   const workflow = readFileSync(".github/workflows/toolchain-publish.yml", "utf8");
 
   assert.match(workflow, /--draft/u);
-  assert.match(workflow, /--prerelease/u);
+  const createDraft = workflow.slice(
+    workflow.indexOf("Create immutable revision draft"),
+    workflow.indexOf("Upload planned draft assets"),
+  );
+  assert.doesNotMatch(createDraft, /--prerelease/u);
   assert.match(workflow, /--latest=false/u);
   assert.match(workflow, /verifyUploadedAsset/u);
   assert.match(workflow, /id: revision_draft/u);
@@ -141,7 +144,13 @@ test("publisher verifies draft bytes and immutable release attestation before pr
     /RELEASE_ID: \$\{\{ steps\.revision_draft\.outputs\.release_id \}\}/u,
   );
   assert.match(workflow, /releases\/\$\{RELEASE_ID\}/u);
+  assert.match(workflow, /revision_state/u);
+  assert.match(
+    workflow,
+    /steps\.publication_plan\.outputs\.revision_state != 'published'/u,
+  );
   assert.match(workflow, /draft:\s*false/u);
+  assert.match(workflow, /release\.prerelease !== false/u);
   assert.match(workflow, /\.immutable !== true/u);
   assert.match(
     workflow,

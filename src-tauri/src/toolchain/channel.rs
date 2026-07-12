@@ -201,10 +201,8 @@ pub fn verify_channel_manifest(
             record.manifest, record.revision
         ));
     }
-    let expected_prefix = format!(
-        "/{}/releases/download/{}/",
-        record.repository, record.release_tag
-    );
+    let channel_revision = ToolchainRevision::parse(&record.revision)?;
+    let expected_prefix = format!("/{}/releases/download/", record.repository);
     for target in &manifest.targets {
         for tool in &target.tools {
             let url = reqwest::Url::parse(&tool.source_url).map_err(|error| {
@@ -213,19 +211,24 @@ pub fn verify_channel_manifest(
                     target.target, tool.name
                 )
             })?;
-            let asset_name = url.path().strip_prefix(&expected_prefix).unwrap_or("");
+            let source_path = url.path().strip_prefix(&expected_prefix).unwrap_or("");
+            let (release_tag, asset_name) = source_path.split_once('/').unwrap_or(("", ""));
+            let source_revision = release_tag
+                .strip_prefix("toolchain-")
+                .and_then(|value| ToolchainRevision::parse(value).ok());
             if url.scheme() != "https"
                 || url.host_str() != Some("github.com")
                 || !url.username().is_empty()
                 || url.password().is_some()
                 || url.query().is_some()
                 || url.fragment().is_some()
+                || source_revision.is_none_or(|revision| revision > channel_revision)
                 || asset_name.is_empty()
                 || asset_name.contains('/')
             {
                 return Err(format!(
-                    "Archive URL for {}/{} must match {}",
-                    target.target, tool.name, record.release_tag
+                    "Archive URL for {}/{} must use a toolchain revision no newer than {}",
+                    target.target, tool.name, record.revision
                 ));
             }
         }
@@ -321,10 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn verifies_manifest_digest_revision_and_archive_urls() {
+    fn verifies_manifest_digest_revision_and_historical_archive_urls() {
         let manifest_json = br#"{
           "schemaVersion": 4,
-          "revision": "20260712.1",
+          "revision": "20260712.2",
           "targets": [{
             "target": "win-x64",
             "tools": [{
@@ -340,13 +343,22 @@ mod tests {
         }"#;
         let record = ChannelRecord {
             repository: ARCHIVE_REPOSITORY.to_string(),
-            revision: "20260712.1".to_string(),
-            release_tag: "toolchain-20260712.1".to_string(),
-            manifest: "tools-manifest-20260712.1.json".to_string(),
+            revision: "20260712.2".to_string(),
+            release_tag: "toolchain-20260712.2".to_string(),
+            manifest: "tools-manifest-20260712.2.json".to_string(),
             sha256: sha256_bytes(manifest_json),
         };
 
         assert!(verify_channel_manifest(&record, manifest_json).is_ok());
         assert!(verify_channel_manifest(&record, b"{}").is_err());
+
+        let future_manifest = String::from_utf8(manifest_json.to_vec())
+            .unwrap()
+            .replace("toolchain-20260712.1", "toolchain-20260713.1");
+        let future_record = ChannelRecord {
+            sha256: sha256_bytes(future_manifest.as_bytes()),
+            ..record
+        };
+        assert!(verify_channel_manifest(&future_record, future_manifest.as_bytes()).is_err());
     }
 }
