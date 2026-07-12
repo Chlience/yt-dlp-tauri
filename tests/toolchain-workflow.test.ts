@@ -161,6 +161,21 @@ test("validation workflow runs baseline first and diagnoses source units", () =>
   assert.match(workflow, /FFmpeg mirror skipped; upstream URL retained/);
 });
 
+test("validation accepts a legacy baseline without a toolchain lock", () => {
+  const workflow = readFileSync(".github/workflows/toolchain-validate.yml", "utf8");
+
+  assert.match(workflow, /const tryShowBaseline = \(path\) =>/u);
+  assert.match(
+    workflow,
+    /const baselineManifestJson = showBaseline\("src-tauri\/tools-manifest\.json"\)/u,
+  );
+  assert.match(
+    workflow,
+    /const baselineLockJson = tryShowBaseline\("toolchain-lock\.json"\)/u,
+  );
+  assert.match(workflow, /baselineLockJson \?\? "null\\n"/u);
+});
+
 test("repository has one toolchain updater", () => {
   assert.equal(existsSync(".github/workflows/update-yt-dlp.yml"), false);
   assert.equal(existsSync("scripts/update-yt-dlp-manifest.mjs"), false);

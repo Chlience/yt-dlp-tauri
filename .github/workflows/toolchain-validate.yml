@@ -89,14 +89,20 @@ jobs:
             writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
           const baselineRefs = [process.env.BASELINE_SHA, "HEAD^"]
             .filter(Boolean);
-          const showBaseline = (path) => {
+          const tryShowBaseline = (path) => {
             for (const ref of baselineRefs) {
               try {
                 return execFileSync("git", ["show", `${ref}:${path}`], {
                   encoding: "utf8",
+                  stdio: ["ignore", "pipe", "pipe"],
                 });
               } catch {}
             }
+            return null;
+          };
+          const showBaseline = (path) => {
+            const contents = tryShowBaseline(path);
+            if (contents !== null) return contents;
             throw new Error(`Unable to read baseline ${path}`);
           };
 
@@ -173,7 +179,7 @@ jobs:
             });
           }
           const baselineManifestJson = showBaseline("src-tauri/tools-manifest.json");
-          const baselineLockJson = showBaseline("toolchain-lock.json");
+          const baselineLockJson = tryShowBaseline("toolchain-lock.json");
           const baselineManifest = JSON.parse(baselineManifestJson);
           writeJson(
             ".toolchain/manifests/runtime-candidate.json",
@@ -186,7 +192,11 @@ jobs:
           }
           writeJson(".toolchain/manifests/candidate.json", candidateManifest);
           writeFileSync(".toolchain/manifests/baseline.json", baselineManifestJson, "utf8");
-          writeFileSync(".toolchain/manifests/baseline-lock.json", baselineLockJson, "utf8");
+          writeFileSync(
+            ".toolchain/manifests/baseline-lock.json",
+            baselineLockJson ?? "null\n",
+            "utf8",
+          );
 
           const units = new Map([
             ["yt-dlp", new Set(["yt-dlp"])],
