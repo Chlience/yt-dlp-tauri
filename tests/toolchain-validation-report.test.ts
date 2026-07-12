@@ -65,6 +65,17 @@ function reportContext() {
   };
 }
 
+function candidateIdentity() {
+  return {
+    artifactName: "toolchain-candidate-20260711.1",
+    artifactId: "9876",
+    artifactDigest: "d".repeat(64),
+    repositoryId: "42",
+    pullRequestNumber: 77,
+    headSha: "e".repeat(40),
+  };
+}
+
 test("publication report requires all native targets and exact hashes", () => {
   const report = mergeTargetReports(targetReports(), reportContext());
 
@@ -79,6 +90,22 @@ test("publication report requires all native targets and exact hashes", () => {
       manifestSha256: DIGESTS.manifest,
       lockSha256: DIGESTS.lock,
     }),
+  );
+});
+
+test("validation report binds the pull request candidate artifact", () => {
+  const context = { ...reportContext(), candidate: candidateIdentity() };
+  const report = mergeTargetReports(targetReports(), context);
+
+  assert.deepEqual(report.candidate, candidateIdentity());
+  assert.doesNotThrow(() => validatePublicationReport(report, context));
+  assert.throws(
+    () =>
+      mergeTargetReports(targetReports(), {
+        ...reportContext(),
+        candidate: { ...candidateIdentity(), artifactDigest: "SHA256:invalid" },
+      }),
+    /artifact digest/u,
   );
 });
 

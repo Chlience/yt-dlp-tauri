@@ -75,8 +75,9 @@ export function mergeTargetReports(reports, context) {
     lockSha256: normalizedContext.lockSha256,
     runId: normalizedContext.runId,
     runUrl: normalizedContext.runUrl,
-    targets: normalizedReports,
   };
+  if (normalizedContext.candidate) merged.candidate = normalizedContext.candidate;
+  merged.targets = normalizedReports;
   if (normalizedContext.canary) merged.canary = normalizedContext.canary;
   return merged;
 }
@@ -96,6 +97,7 @@ export function validatePublicationReport(report, expected) {
     lockSha256: report.lockSha256,
     runId: report.runId,
     runUrl: report.runUrl,
+    candidate: report.candidate,
     canary: report.canary,
   });
   if (JSON.stringify(normalized) !== JSON.stringify(report)) {
@@ -107,6 +109,13 @@ export function validatePublicationReport(report, expected) {
   assertEqual(report.commitSha, expectedValues.commitSha, "commit SHA");
   assertEqual(report.manifestSha256, expectedValues.manifestSha256, "manifest SHA-256");
   assertEqual(report.lockSha256, expectedValues.lockSha256, "lock SHA-256");
+  if (expectedValues.candidate) {
+    assertEqual(
+      JSON.stringify(report.candidate),
+      JSON.stringify(expectedValues.candidate),
+      "candidate artifact identity",
+    );
+  }
 
   for (const target of report.targets) {
     if (!target.success) {
@@ -257,6 +266,9 @@ function normalizeContext(context) {
     runId: requireRunId(context.runId),
     runUrl: requireHttpsUrl(context.runUrl, "Validation run URL"),
   };
+  if (context.candidate !== undefined) {
+    normalized.candidate = normalizeCandidate(context.candidate, normalized.revision);
+  }
   if (context.canary !== undefined) {
     normalized.canary = normalizeCanary(context.canary);
   }
@@ -280,12 +292,48 @@ function normalizeExpected(expected) {
   if (!expected || typeof expected !== "object") {
     throw new Error("Expected publication identity must be an object");
   }
-  return {
+  const normalized = {
     revision: requireRevision(expected.revision),
     commitSha: requireCommitSha(expected.commitSha, "Expected commit SHA"),
     manifestSha256: requireSha256(expected.manifestSha256, "Expected manifest SHA-256"),
     lockSha256: requireSha256(expected.lockSha256, "Expected lock SHA-256"),
   };
+  if (expected.candidate !== undefined) {
+    normalized.candidate = normalizeCandidate(expected.candidate, normalized.revision);
+  }
+  return normalized;
+}
+
+function normalizeCandidate(candidate, revision) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    throw new Error("Candidate artifact identity must be an object");
+  }
+  const artifactName = requireString(candidate.artifactName, "Candidate artifact name");
+  if (artifactName !== `toolchain-candidate-${revision}`) {
+    throw new Error(`Candidate artifact name must match revision ${revision}`);
+  }
+  return {
+    artifactName,
+    artifactId: requirePositiveIdentifier(candidate.artifactId, "Candidate artifact ID"),
+    artifactDigest: requireSha256(candidate.artifactDigest, "Candidate artifact digest"),
+    repositoryId: requirePositiveIdentifier(
+      candidate.repositoryId,
+      "Candidate repository ID",
+    ),
+    pullRequestNumber: requirePositiveInteger(
+      candidate.pullRequestNumber,
+      "Candidate pull request number",
+    ),
+    headSha: requireCommitSha(candidate.headSha, "Candidate head SHA"),
+  };
+}
+
+function requirePositiveIdentifier(value, label) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return String(value);
+  }
+  if (typeof value === "string" && /^[1-9][0-9]*$/u.test(value)) return value;
+  throw new Error(`${label} must be a positive integer string`);
 }
 
 function normalizeIdentifier(value, label) {

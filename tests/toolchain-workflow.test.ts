@@ -133,12 +133,27 @@ test("validation workflow uses native targets with read-only permissions", () =>
   assert.match(workflow, /macos-15/);
   assert.match(workflow, /name: toolchain-validation/);
   assert.match(workflow, /toolchain-validation-report/);
-  assert.match(workflow, /toolchain-mirror-candidates/);
+  assert.match(workflow, /toolchain-candidate-/u);
   assert.match(workflow, new RegExp(`dtolnay/rust-toolchain@${RUST_TOOLCHAIN_SHA}`));
   assert.match(workflow, new RegExp(`Swatinem/rust-cache@${RUST_CACHE_SHA}`));
   assert.match(workflow, new RegExp(`actions/upload-artifact@${UPLOAD_ARTIFACT_SHA}`));
   assert.match(workflow, new RegExp(`actions/download-artifact@${DOWNLOAD_ARTIFACT_SHA}`));
   assert.doesNotMatch(workflow, /contents: write|pull-requests: write|secrets: inherit/);
+});
+
+test("validation prepares one candidate bundle and reuses it on native runners", () => {
+  const workflow = readFileSync(".github/workflows/toolchain-validate.yml", "utf8");
+
+  assert.match(workflow, /prepare-candidate:/u);
+  assert.match(workflow, /node scripts\/prepare-toolchain-candidate\.mjs/u);
+  assert.match(workflow, /node scripts\/verify-toolchain-candidate\.mjs/u);
+  assert.match(workflow, /retention-days:\s*7/u);
+  assert.match(workflow, /compression-level:\s*0/u);
+  assert.match(workflow, /artifact-id/u);
+  assert.match(workflow, /artifact-digest/u);
+  assert.match(workflow, /needs:\s*prepare-candidate/u);
+  assert.match(workflow, /sourceMode:\s*"candidate"/u);
+  assert.match(workflow, /--asset-root\s+\.toolchain\/candidate/u);
 });
 
 test("validation workflow runs baseline first and diagnoses source units", () => {
@@ -150,15 +165,14 @@ test("validation workflow runs baseline first and diagnoses source units", () =>
   assert.match(workflow, /Diagnostic yt-dlp/);
   assert.match(workflow, /Diagnostic Deno/);
   assert.match(workflow, /Diagnostic FFmpeg/);
-  assert.match(workflow, /baseline_smoke\.outcome == 'success'/);
   assert.match(workflow, /candidate_smoke\.outcome != 'success'/);
   assert.match(workflow, /Infrastructure baseline failed/);
   assert.match(workflow, /Candidate public-site Canary/);
   assert.match(workflow, /toolchain-canary\.json/);
   assert.match(workflow, /blocking: false/);
-  assert.match(workflow, /ffmpeg-provenance\.mjs/);
-  assert.match(workflow, /mirror_candidate\.outputs\.eligible == 'true'/);
-  assert.match(workflow, /FFmpeg mirror skipped; upstream URL retained/);
+  const candidateBlock = workflow.slice(candidate, workflow.indexOf("Candidate deterministic compatibility"));
+  assert.doesNotMatch(candidateBlock, /baseline_smoke|baseline_compatibility/u);
+  assert.doesNotMatch(workflow, /Upload toolchain mirror candidates/u);
 });
 
 test("validation accepts a legacy baseline without a toolchain lock", () => {

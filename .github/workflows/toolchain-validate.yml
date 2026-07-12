@@ -15,6 +15,36 @@ on:
         required: false
         default: ""
         type: string
+      candidate_artifact_name:
+        description: "Candidate bundle artifact already present in the caller run"
+        required: false
+        default: ""
+        type: string
+      candidate_artifact_id:
+        description: "Original pull request candidate artifact ID"
+        required: false
+        default: ""
+        type: string
+      candidate_artifact_digest:
+        description: "Original pull request candidate artifact digest"
+        required: false
+        default: ""
+        type: string
+      candidate_repository_id:
+        description: "Repository ID bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
+      candidate_pull_request:
+        description: "Pull request number bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
+      candidate_head_sha:
+        description: "Pull request head SHA bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -24,8 +54,117 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare-candidate:
+    name: Prepare candidate bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      artifact_name: ${{ steps.context.outputs.artifact_name }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id || steps.context.outputs.artifact_id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest || steps.context.outputs.artifact_digest }}
+      repository_id: ${{ steps.context.outputs.repository_id }}
+      pull_request: ${{ steps.context.outputs.pull_request }}
+      head_sha: ${{ steps.context.outputs.head_sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Resolve candidate context
+        id: context
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+          PROVIDED_ARTIFACT: ${{ inputs.candidate_artifact_name || '' }}
+          PROVIDED_ARTIFACT_ID: ${{ inputs.candidate_artifact_id || '' }}
+          PROVIDED_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest || '' }}
+          PROVIDED_REPOSITORY_ID: ${{ inputs.candidate_repository_id || '' }}
+          PROVIDED_PULL_REQUEST: ${{ inputs.candidate_pull_request || '' }}
+          PROVIDED_HEAD_SHA: ${{ inputs.candidate_head_sha || '' }}
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          PR_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ROLLBACK_REVISION" ]]; then
+            artifact_name=""
+            artifact_id=""
+            artifact_digest=""
+            repository_id=""
+            pull_request=""
+            head_sha=""
+          elif [[ "$EVENT_NAME" == "workflow_call" ]]; then
+            artifact_name="$PROVIDED_ARTIFACT"
+            artifact_id="$PROVIDED_ARTIFACT_ID"
+            artifact_digest="$PROVIDED_ARTIFACT_DIGEST"
+            repository_id="$PROVIDED_REPOSITORY_ID"
+            pull_request="$PROVIDED_PULL_REQUEST"
+            head_sha="$PROVIDED_HEAD_SHA"
+            [[ -n "$artifact_name" && -n "$artifact_id" && -n "$artifact_digest" ]]
+            [[ -n "$repository_id" && -n "$pull_request" && -n "$head_sha" ]]
+          else
+            revision="$(node -p "require('./toolchain-lock.json').revision")"
+            artifact_name="toolchain-candidate-${revision}"
+            artifact_id=""
+            artifact_digest=""
+            repository_id="${PR_REPOSITORY_ID:-$EVENT_REPOSITORY_ID}"
+            pull_request="$PR_NUMBER"
+            head_sha="${PR_HEAD_SHA:-$COMMIT_SHA}"
+          fi
+          {
+            echo "artifact_name=$artifact_name"
+            echo "artifact_id=$artifact_id"
+            echo "artifact_digest=$artifact_digest"
+            echo "repository_id=$repository_id"
+            echo "pull_request=$pull_request"
+            echo "head_sha=$head_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Node dependencies
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        run: npm ci
+
+      - name: Prepare candidate bundle
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        shell: bash
+        env:
+          REPOSITORY_ID: ${{ steps.context.outputs.repository_id }}
+          PULL_REQUEST: ${{ steps.context.outputs.pull_request }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --output .toolchain/candidate
+            --repository-id "$REPOSITORY_ID"
+            --head-sha "$HEAD_SHA"
+          )
+          if [[ -n "$PULL_REQUEST" ]]; then args+=(--pull-request "$PULL_REQUEST"); fi
+          node scripts/prepare-toolchain-candidate.mjs "${args[@]}"
+
+      - name: Upload candidate bundle
+        id: upload
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.context.outputs.artifact_name }}
+          path: .toolchain/candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
   validate-native:
     name: Validate ${{ matrix.target }}
+    needs: prepare-candidate
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
@@ -67,6 +206,31 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Download candidate bundle
+        if: ${{ inputs.rollback_revision == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.prepare-candidate.outputs.artifact_name }}
+          path: .toolchain/candidate
+
+      - name: Verify candidate bundle
+        id: verify_candidate
+        if: ${{ inputs.rollback_revision == '' }}
+        shell: bash
+        env:
+          REPOSITORY_ID: ${{ needs.prepare-candidate.outputs.repository_id }}
+          PULL_REQUEST: ${{ needs.prepare-candidate.outputs.pull_request }}
+          HEAD_SHA: ${{ needs.prepare-candidate.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          args=(
+            --directory .toolchain/candidate
+            --repository-id "$REPOSITORY_ID"
+            --head-sha "$HEAD_SHA"
+          )
+          if [[ -n "$PULL_REQUEST" ]]; then args+=(--pull-request "$PULL_REQUEST"); fi
+          node scripts/verify-toolchain-candidate.mjs "${args[@]}"
 
       - name: Prepare baseline, candidate, and diagnostic manifests
         shell: bash
@@ -175,7 +339,7 @@ jobs:
               throw new Error("Checked-in runtime manifest differs from the generated lock output");
             }
             candidateManifest = generateManifest(policy, candidateLock, {
-              sourceMode: "upstream",
+              sourceMode: "candidate",
             });
           }
           const baselineManifestJson = showBaseline("src-tauri/tools-manifest.json");
@@ -268,20 +432,25 @@ jobs:
 
       - name: Candidate smoke
         id: candidate_smoke
-        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' }}
         continue-on-error: true
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
         run: |
           set -euo pipefail
           smoke="src-tauri/target/debug/toolchain-smoke"
           if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          asset_args=()
+          if [[ -z "$ROLLBACK_REVISION" ]]; then
+            asset_args=(--asset-root .toolchain/candidate)
+          fi
           "$smoke" \
             --manifest .toolchain/manifests/candidate.json \
             --target "$TARGET" \
             --root "$RUNNER_TEMP/toolchain-candidate/$TARGET" \
-            --report ".toolchain/results/candidate-${TARGET}.json"
+            --report ".toolchain/results/candidate-${TARGET}.json" \
+            "${asset_args[@]}"
 
       - name: Candidate deterministic compatibility
         id: candidate_compatibility
@@ -367,104 +536,6 @@ jobs:
             --report ".toolchain/results/diagnostic-ffmpeg-compatibility-${TARGET}.json" \
             --work-root "$RUNNER_TEMP/diagnostic-ffmpeg-compatibility/$TARGET"
 
-      - name: Verify Windows FFmpeg mirror candidate
-        id: mirror_candidate
-        if: ${{ inputs.rollback_revision == '' && matrix.target == 'win-x64' && steps.candidate_smoke.outcome == 'success' && steps.candidate_compatibility.outcome == 'success' }}
-        continue-on-error: true
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'NODE'
-          import { createHash } from "node:crypto";
-          import { createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs";
-          import { appendFile, mkdir } from "node:fs/promises";
-          import { join } from "node:path";
-          import { Readable, Transform } from "node:stream";
-          import { pipeline } from "node:stream/promises";
-          import {
-            canonicalFfmpegProvenanceJson,
-            createFfmpegProvenanceAsset,
-            resolveFfmpegProvenance,
-            verifyFfmpegProvenance,
-          } from "./scripts/toolchain/ffmpeg-provenance.mjs";
-
-          const lock = JSON.parse(readFileSync("toolchain-lock.json", "utf8"));
-          const policy = JSON.parse(readFileSync("toolchain-policy.json", "utf8"));
-          const source = lock.sources.find((item) => item.id === "ffmpeg-windows");
-          const asset = source?.assets.find((item) => item.target === "win-x64");
-          if (!asset) throw new Error("Windows FFmpeg lock asset is missing");
-          const redistribution = policy.sources.find(
-            (item) => item.id === "ffmpeg-windows",
-          )?.redistribution;
-          if (!redistribution) throw new Error("Windows FFmpeg redistribution policy is missing");
-          for (const licenseFile of redistribution.licenseFiles) {
-            if (!existsSync(licenseFile)) {
-              throw new Error(`FFmpeg license file is missing: ${licenseFile}`);
-            }
-          }
-          const provenance = await resolveFfmpegProvenance(source, {
-            githubToken: process.env.GH_TOKEN,
-            licenseFiles: redistribution.licenseFiles,
-          });
-          const eligibility = verifyFfmpegProvenance(source, provenance);
-          if (!eligibility.eligible) {
-            process.stdout.write(`${eligibility.problems.join("\n")}\n`);
-            await appendFile(process.env.GITHUB_OUTPUT, "eligible=false\n", "utf8");
-            process.exit(0);
-          }
-          const response = await fetch(asset.sourceUrl, {
-            headers: {
-              Authorization: `Bearer ${process.env.GH_TOKEN}`,
-              "User-Agent": "yt-dlp-tauri-toolchain-validation",
-            },
-          });
-          if (!response.ok || !response.body) {
-            throw new Error(`Failed to download Windows FFmpeg: ${response.status}`);
-          }
-          await mkdir(".toolchain/mirror-candidates", { recursive: true });
-          const mirrorName = redistribution.mirrorNameTemplate.replace(
-            "{revision}",
-            lock.revision,
-          );
-          const destination = join(".toolchain/mirror-candidates", mirrorName);
-          const hash = createHash("sha256");
-          let size = 0;
-          const hasher = new Transform({
-            transform(chunk, _encoding, callback) {
-              hash.update(chunk);
-              size += chunk.length;
-              callback(null, chunk);
-            },
-          });
-          await pipeline(
-            Readable.fromWeb(response.body),
-            hasher,
-            createWriteStream(destination, { flags: "wx" }),
-          );
-          const sha256 = hash.digest("hex");
-          if (sha256 !== asset.sha256 || size !== asset.size) {
-            throw new Error(
-              `Windows FFmpeg verification failed: ${sha256}/${size}`,
-            );
-          }
-          const provenanceAsset = createFfmpegProvenanceAsset(
-            lock.revision,
-            source,
-            provenance,
-          );
-          writeFileSync(
-            join(
-              ".toolchain/mirror-candidates",
-              `ffmpeg-provenance-${lock.revision}.json`,
-            ),
-            canonicalFfmpegProvenanceJson({ ...provenanceAsset, mirrorName }),
-            "utf8",
-          );
-          await appendFile(process.env.GITHUB_OUTPUT, "eligible=true\n", "utf8");
-          NODE
-
       - name: Run project tests
         id: project_tests
         if: ${{ always() }}
@@ -488,9 +559,9 @@ jobs:
           ARCHITECTURE: ${{ matrix.architecture }}
           BASELINE_SMOKE: ${{ steps.baseline_smoke.outcome }}
           BASELINE_COMPATIBILITY: ${{ steps.baseline_compatibility.outcome }}
+          CANDIDATE_BUNDLE: ${{ steps.verify_candidate.outcome }}
           CANDIDATE_SMOKE: ${{ steps.candidate_smoke.outcome }}
           CANDIDATE_COMPATIBILITY: ${{ steps.candidate_compatibility.outcome }}
-          MIRROR_ELIGIBLE: ${{ steps.mirror_candidate.outputs.eligible }}
           PROJECT_TESTS: ${{ steps.project_tests.outcome }}
           DIAGNOSTIC_YTDLP: ${{ steps.diagnostic_ytdlp.outcome }}
           DIAGNOSTIC_DENO: ${{ steps.diagnostic_deno.outcome }}
@@ -577,28 +648,10 @@ jobs:
               summary: "Infrastructure baseline failed",
             });
           }
-          if (
-            !rollbackRevision &&
-            target === "win-x64" &&
-            process.env.CANDIDATE_COMPATIBILITY === "success"
-          ) {
-            diagnostics.push({
-              sourceUnit: "ffmpeg-mirror",
-              success: process.env.MIRROR_ELIGIBLE === "true",
-              summary:
-                process.env.MIRROR_ELIGIBLE === "true"
-                  ? "FFmpeg redistribution provenance complete"
-                  : "FFmpeg mirror skipped; upstream URL retained",
-            });
-          }
           const checks = {
             supplyChain:
               smoke !== null &&
-              (Boolean(rollbackRevision) ||
-                !manifestTarget.tools.some((tool) =>
-                  tool.sourceUrl.includes("/releases/download/toolchain-stable/"),
-                ) ||
-                process.env.MIRROR_ELIGIBLE === "true"),
+              (Boolean(rollbackRevision) || process.env.CANDIDATE_BUNDLE === "success"),
             executables: process.env.CANDIDATE_SMOKE === "success",
             dash: process.env.CANDIDATE_COMPATIBILITY === "success",
             projectTests: process.env.PROJECT_TESTS === "success",
@@ -649,19 +702,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload toolchain mirror candidates
-        if: ${{ matrix.target == 'win-x64' && steps.mirror_candidate.outputs.eligible == 'true' && steps.project_tests.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: toolchain-mirror-candidates
-          path: .toolchain/mirror-candidates
-          if-no-files-found: error
-          retention-days: 14
-
   toolchain-validation:
     name: toolchain-validation
     if: ${{ always() }}
-    needs: validate-native
+    needs: [prepare-candidate, validate-native]
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -692,6 +736,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}
           ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+          CANDIDATE_ARTIFACT_NAME: ${{ needs.prepare-candidate.outputs.artifact_name }}
+          CANDIDATE_ARTIFACT_ID: ${{ needs.prepare-candidate.outputs.artifact_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ needs.prepare-candidate.outputs.artifact_digest }}
+          CANDIDATE_REPOSITORY_ID: ${{ needs.prepare-candidate.outputs.repository_id }}
+          CANDIDATE_PULL_REQUEST: ${{ needs.prepare-candidate.outputs.pull_request }}
+          CANDIDATE_HEAD_SHA: ${{ needs.prepare-candidate.outputs.head_sha }}
         run: |
           node --input-type=module <<'NODE'
           import { createHash } from "node:crypto";
@@ -779,6 +829,16 @@ jobs:
               runId: process.env.RUN_ID,
               runUrl: process.env.RUN_URL,
             };
+            if (process.env.CANDIDATE_PULL_REQUEST) {
+              context.candidate = {
+                artifactName: process.env.CANDIDATE_ARTIFACT_NAME,
+                artifactId: process.env.CANDIDATE_ARTIFACT_ID,
+                artifactDigest: process.env.CANDIDATE_ARTIFACT_DIGEST,
+                repositoryId: process.env.CANDIDATE_REPOSITORY_ID,
+                pullRequestNumber: Number(process.env.CANDIDATE_PULL_REQUEST),
+                headSha: process.env.CANDIDATE_HEAD_SHA,
+              };
+            }
           }
           const canary = reports.find((report) => report.target === "win-x64")?.canary;
           if (canary) context.canary = canary;
