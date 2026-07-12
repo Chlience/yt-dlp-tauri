@@ -70,16 +70,16 @@ test("FFprobe requires one audio and one video stream", () => {
   );
 });
 
-test("command failures prefer error lines over warnings", async () => {
+test("command failures prefer actionable carriage-return errors over warnings", async () => {
   await assert.rejects(
     runCommand({
       command: process.execPath,
       args: [
         "-e",
-        "console.error('WARNING: fallback'); console.error('ERROR: root cause'); process.exit(1)",
+        "process.stderr.write('WARNING: fallback\\rERROR:\\r[download] HTTP Error 404\\r'); process.exit(1)",
       ],
     }),
-    /ERROR: root cause/u,
+    /\[download\] HTTP Error 404/u,
   );
 });
 
@@ -95,6 +95,7 @@ test("media server rejects decoded paths outside its root", async () => {
     const valid = await fetch(`${server.origin}/media.mpd`);
     assert.equal(valid.status, 200);
     assert.equal(await valid.text(), "manifest");
+    assert.ok(server.requests.includes("/media.mpd"));
 
     const traversal = await fetch(`${server.origin}/%2e%2e%2foutside.txt`);
     assert.equal(traversal.status, 403);

@@ -150,7 +150,13 @@ export async function runCompatibilitySuite(options) {
       manifestUrl: `${server.origin}/media.mpd`,
       output: outputTemplate,
     });
-    await commandRunner(commands.download, { timeoutMs: options.commandTimeoutMs });
+    try {
+      await commandRunner(commands.download, { timeoutMs: options.commandTimeoutMs });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const requests = server.requests.join(", ") || "none";
+      throw new Error(`${message}; media requests: ${requests}`);
+    }
 
     commands.probe = ffprobeStreamsCommand({ ffprobe: paths.ffprobe, mediaPath: outputPath });
     const probe = await commandRunner(commands.probe, { timeoutMs: options.commandTimeoutMs });
@@ -181,7 +187,9 @@ export async function runCompatibilitySuite(options) {
 
 export async function startMediaServer(mediaRoot) {
   const canonicalRoot = await realpath(mediaRoot);
+  const requests = [];
   const server = createServer(async (request, response) => {
+    requests.push(request.url ?? "/");
     try {
       if (request.method !== "GET" && request.method !== "HEAD") {
         response.writeHead(405, { Allow: "GET, HEAD" }).end();
@@ -248,6 +256,7 @@ export async function startMediaServer(mediaRoot) {
 
   return {
     origin: `http://127.0.0.1:${address.port}`,
+    requests,
     close: () =>
       new Promise((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
@@ -371,11 +380,15 @@ function mediaContentType(path) {
 function preferredOutputLine(...values) {
   const lines = values.flatMap((value) =>
     value
-      .split(/\r?\n/u)
+      .split(/\r\n?|\n/u)
       .map((line) => line.trim())
       .filter(Boolean),
   );
-  return lines.find((line) => /(?:^|\s)ERROR:/iu.test(line)) ?? lines[0];
+  return (
+    lines.find((line) => /(?:^|\s)ERROR:\s*\S/iu.test(line)) ??
+    lines.find((line) => !/^WARNING:/iu.test(line) && !/^ERROR:\s*$/iu.test(line)) ??
+    lines[0]
+  );
 }
 
 function parseCliArguments(argumentsList) {
