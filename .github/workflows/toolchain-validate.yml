@@ -1,0 +1,867 @@
+name: Toolchain Validation
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      rollback_revision:
+        description: "Historical toolchain revision to revalidate"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      rollback_revision:
+        description: "Historical toolchain revision to revalidate"
+        required: false
+        default: ""
+        type: string
+      candidate_artifact_name:
+        description: "Candidate bundle artifact already present in the caller run"
+        required: false
+        default: ""
+        type: string
+      candidate_artifact_id:
+        description: "Original pull request candidate artifact ID"
+        required: false
+        default: ""
+        type: string
+      candidate_artifact_digest:
+        description: "Original pull request candidate artifact digest"
+        required: false
+        default: ""
+        type: string
+      candidate_repository_id:
+        description: "Repository ID bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
+      candidate_pull_request:
+        description: "Pull request number bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
+      candidate_head_sha:
+        description: "Pull request head SHA bound to the candidate bundle"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-validation-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-candidate:
+    name: Prepare candidate bytes
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      artifact_name: ${{ steps.context.outputs.artifact_name }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id || steps.context.outputs.artifact_id }}
+      artifact_digest: ${{ steps.upload.outputs.artifact-digest || steps.context.outputs.artifact_digest }}
+      repository_id: ${{ steps.context.outputs.repository_id }}
+      pull_request: ${{ steps.context.outputs.pull_request }}
+      head_sha: ${{ steps.context.outputs.head_sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Resolve candidate context
+        id: context
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+          PROVIDED_ARTIFACT: ${{ inputs.candidate_artifact_name || '' }}
+          PROVIDED_ARTIFACT_ID: ${{ inputs.candidate_artifact_id || '' }}
+          PROVIDED_ARTIFACT_DIGEST: ${{ inputs.candidate_artifact_digest || '' }}
+          PROVIDED_REPOSITORY_ID: ${{ inputs.candidate_repository_id || '' }}
+          PROVIDED_PULL_REQUEST: ${{ inputs.candidate_pull_request || '' }}
+          PROVIDED_HEAD_SHA: ${{ inputs.candidate_head_sha || '' }}
+          EVENT_REPOSITORY_ID: ${{ github.event.repository.id }}
+          PR_REPOSITORY_ID: ${{ github.event.pull_request.head.repo.id || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          COMMIT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$ROLLBACK_REVISION" ]]; then
+            artifact_name=""
+            artifact_id=""
+            artifact_digest=""
+            repository_id=""
+            pull_request=""
+            head_sha=""
+          elif [[ "$EVENT_NAME" == "workflow_call" ]]; then
+            artifact_name="$PROVIDED_ARTIFACT"
+            artifact_id="$PROVIDED_ARTIFACT_ID"
+            artifact_digest="$PROVIDED_ARTIFACT_DIGEST"
+            repository_id="$PROVIDED_REPOSITORY_ID"
+            pull_request="$PROVIDED_PULL_REQUEST"
+            head_sha="$PROVIDED_HEAD_SHA"
+            [[ -n "$artifact_name" && -n "$artifact_id" && -n "$artifact_digest" ]]
+            [[ -n "$repository_id" && -n "$pull_request" && -n "$head_sha" ]]
+          else
+            revision="$(node -p "require('./toolchain-lock.json').revision")"
+            artifact_name="toolchain-candidate-${revision}"
+            artifact_id=""
+            artifact_digest=""
+            repository_id="${PR_REPOSITORY_ID:-$EVENT_REPOSITORY_ID}"
+            pull_request="$PR_NUMBER"
+            head_sha="${PR_HEAD_SHA:-$COMMIT_SHA}"
+          fi
+          {
+            echo "artifact_name=$artifact_name"
+            echo "artifact_id=$artifact_id"
+            echo "artifact_digest=$artifact_digest"
+            echo "repository_id=$repository_id"
+            echo "pull_request=$pull_request"
+            echo "head_sha=$head_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Node dependencies
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        run: npm ci
+
+      - name: Prepare candidate bundle
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        shell: bash
+        env:
+          REPOSITORY_ID: ${{ steps.context.outputs.repository_id }}
+          PULL_REQUEST: ${{ steps.context.outputs.pull_request }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(
+            --output .toolchain/candidate
+            --repository-id "$REPOSITORY_ID"
+            --head-sha "$HEAD_SHA"
+          )
+          if [[ -n "$PULL_REQUEST" ]]; then args+=(--pull-request "$PULL_REQUEST"); fi
+          node scripts/prepare-toolchain-candidate.mjs "${args[@]}"
+
+      - name: Upload candidate bundle
+        id: upload
+        if: ${{ inputs.rollback_revision == '' && github.event_name != 'workflow_call' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.context.outputs.artifact_name }}
+          path: .toolchain/candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  validate-native:
+    name: Validate ${{ matrix.target }}
+    needs: prepare-candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+            architecture: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          workspaces: src-tauri -> target
+          key: toolchain-${{ matrix.target }}
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Download candidate bundle
+        if: ${{ inputs.rollback_revision == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.prepare-candidate.outputs.artifact_name }}
+          path: .toolchain/candidate
+
+      - name: Verify candidate bundle
+        id: verify_candidate
+        if: ${{ inputs.rollback_revision == '' }}
+        shell: bash
+        env:
+          REPOSITORY_ID: ${{ needs.prepare-candidate.outputs.repository_id }}
+          PULL_REQUEST: ${{ needs.prepare-candidate.outputs.pull_request }}
+          HEAD_SHA: ${{ needs.prepare-candidate.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          args=(
+            --directory .toolchain/candidate
+            --repository-id "$REPOSITORY_ID"
+            --head-sha "$HEAD_SHA"
+          )
+          if [[ -n "$PULL_REQUEST" ]]; then args+=(--pull-request "$PULL_REQUEST"); fi
+          node scripts/verify-toolchain-candidate.mjs "${args[@]}"
+
+      - name: Prepare baseline, candidate, and diagnostic manifests
+        shell: bash
+        env:
+          BASELINE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_REPOSITORY: Chlience/yt-dlp-tauri-toolchain
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+          import {
+            downloadVerifiedReleaseAsset,
+            fetchToolchainRevisionRelease,
+            verifyArchiveManifestBytes,
+          } from "./scripts/toolchain/archive-channel.mjs";
+          import { generateManifest } from "./scripts/toolchain/generate-manifest.mjs";
+          import { validatePublicationReport } from "./scripts/toolchain/validation-report.mjs";
+
+          mkdirSync(".toolchain/manifests", { recursive: true });
+          const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+          const writeJson = (path, value) =>
+            writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+          const baselineRefs = [process.env.BASELINE_SHA, "HEAD^"]
+            .filter(Boolean);
+          const tryShowBaseline = (path) => {
+            for (const ref of baselineRefs) {
+              try {
+                return execFileSync("git", ["show", `${ref}:${path}`], {
+                  encoding: "utf8",
+                  stdio: ["ignore", "pipe", "pipe"],
+                });
+              } catch {}
+            }
+            return null;
+          };
+          const showBaseline = (path) => {
+            const contents = tryShowBaseline(path);
+            if (contents !== null) return contents;
+            throw new Error(`Unable to read baseline ${path}`);
+          };
+
+          const rollbackRevision = process.env.ROLLBACK_REVISION.trim();
+          let runtimeCandidateManifest;
+          let candidateManifest;
+          let candidateLock;
+          if (rollbackRevision) {
+            if (!/^[0-9]{8}\.[1-9][0-9]*$/u.test(rollbackRevision)) {
+              throw new Error(`Invalid rollback revision: ${rollbackRevision}`);
+            }
+            const releaseTag = `toolchain-${rollbackRevision}`;
+            const release = await fetchToolchainRevisionRelease({
+              revision: rollbackRevision,
+              token: process.env.GH_TOKEN,
+              repository: process.env.ARCHIVE_REPOSITORY,
+              userAgent: "yt-dlp-tauri-toolchain-revalidation",
+            });
+            if (release.tag_name !== releaseTag || release.immutable !== true) {
+              throw new Error(`Historical archive release ${releaseTag} is not immutable`);
+            }
+            const downloadAsset = async (name) => {
+              return downloadVerifiedReleaseAsset({
+                release,
+                name,
+                token: process.env.GH_TOKEN,
+                repository: process.env.ARCHIVE_REPOSITORY,
+                userAgent: "yt-dlp-tauri-toolchain-revalidation",
+              });
+            };
+            const manifestName = `tools-manifest-${rollbackRevision}.json`;
+            const validationName = `toolchain-validation-${rollbackRevision}.json`;
+            const manifestAsset = await downloadAsset(manifestName);
+            const validationAsset = await downloadAsset(validationName);
+            runtimeCandidateManifest = verifyArchiveManifestBytes(
+              {
+                repository: process.env.ARCHIVE_REPOSITORY,
+                revision: rollbackRevision,
+                releaseTag,
+                sha256: manifestAsset.sha256,
+              },
+              manifestAsset.bytes,
+            );
+            candidateManifest = runtimeCandidateManifest;
+            const historicalValidation = JSON.parse(validationAsset.bytes.toString("utf8"));
+            if (runtimeCandidateManifest.revision !== rollbackRevision) {
+              throw new Error("Historical manifest revision does not match the request");
+            }
+            validatePublicationReport(historicalValidation, {
+              revision: rollbackRevision,
+              commitSha: historicalValidation.commitSha,
+              manifestSha256: manifestAsset.sha256,
+              lockSha256: historicalValidation.lockSha256,
+            });
+            writeJson(
+              ".toolchain/manifests/historical-validation.json",
+              historicalValidation,
+            );
+          } else {
+            runtimeCandidateManifest = readJson("src-tauri/tools-manifest.json");
+            candidateLock = readJson("toolchain-lock.json");
+            const policy = readJson("toolchain-policy.json");
+            const generatedRuntimeManifest = generateManifest(policy, candidateLock);
+            if (JSON.stringify(runtimeCandidateManifest) !== JSON.stringify(generatedRuntimeManifest)) {
+              throw new Error("Checked-in runtime manifest differs from the generated lock output");
+            }
+            candidateManifest = generateManifest(policy, candidateLock, {
+              sourceMode: "candidate",
+            });
+          }
+          const baselineManifestJson = showBaseline("src-tauri/tools-manifest.json");
+          const baselineLockJson = tryShowBaseline("toolchain-lock.json");
+          const baselineManifest = JSON.parse(baselineManifestJson);
+          writeJson(
+            ".toolchain/manifests/runtime-candidate.json",
+            runtimeCandidateManifest,
+          );
+          if (candidateLock) {
+            copyFileSync("toolchain-lock.json", ".toolchain/manifests/candidate-lock.json");
+          } else {
+            writeJson(".toolchain/manifests/candidate-lock.json", null);
+          }
+          writeJson(".toolchain/manifests/candidate.json", candidateManifest);
+          writeFileSync(".toolchain/manifests/baseline.json", baselineManifestJson, "utf8");
+          writeFileSync(
+            ".toolchain/manifests/baseline-lock.json",
+            baselineLockJson ?? "null\n",
+            "utf8",
+          );
+
+          const units = new Map([
+            ["yt-dlp", new Set(["yt-dlp"])],
+            ["deno", new Set(["deno"])],
+            ["ffmpeg", new Set(["ffmpeg", "ffprobe"])],
+          ]);
+          for (const [unit, names] of units) {
+            const targets = candidateManifest.targets.map((candidateTarget) => {
+              const baselineTarget = baselineManifest.targets.find(
+                (target) => target.target === candidateTarget.target,
+              );
+              if (!baselineTarget) return candidateTarget;
+              const tools = baselineTarget.tools.map((baselineTool) => {
+                if (!names.has(baselineTool.name)) return baselineTool;
+                const candidateTool = candidateTarget.tools.find(
+                  (tool) => tool.name === baselineTool.name,
+                );
+                if (!candidateTool) {
+                  throw new Error(
+                    `Candidate is missing ${candidateTarget.target}/${baselineTool.name}`,
+                  );
+                }
+                return candidateTool;
+              });
+              return { ...candidateTarget, tools };
+            });
+            writeJson(`.toolchain/manifests/diagnostic-${unit}.json`, {
+              ...candidateManifest,
+              targets,
+            });
+          }
+          NODE
+
+      - name: Build native smoke binary
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --bin toolchain-smoke
+
+      - name: Baseline smoke
+        id: baseline_smoke
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p .toolchain/results
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" \
+            --manifest .toolchain/manifests/baseline.json \
+            --target "$TARGET" \
+            --root "$RUNNER_TEMP/toolchain-baseline/$TARGET" \
+            --report ".toolchain/results/baseline-${TARGET}.json"
+
+      - name: Baseline deterministic compatibility
+        id: baseline_compatibility
+        if: ${{ steps.baseline_smoke.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/baseline-${TARGET}.json" \
+            --report ".toolchain/results/baseline-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/toolchain-baseline-compatibility/$TARGET"
+
+      - name: Candidate smoke
+        id: candidate_smoke
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          asset_args=()
+          if [[ -z "$ROLLBACK_REVISION" ]]; then
+            asset_args=(--asset-root .toolchain/candidate)
+          fi
+          "$smoke" \
+            --manifest .toolchain/manifests/candidate.json \
+            --target "$TARGET" \
+            --root "$RUNNER_TEMP/toolchain-candidate/$TARGET" \
+            --report ".toolchain/results/candidate-${TARGET}.json" \
+            "${asset_args[@]}"
+
+      - name: Candidate deterministic compatibility
+        id: candidate_compatibility
+        if: ${{ steps.candidate_smoke.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/candidate-${TARGET}.json" \
+            --report ".toolchain/results/candidate-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/toolchain-candidate-compatibility/$TARGET"
+
+      - name: Candidate public-site Canary
+        id: candidate_canary
+        if: ${{ inputs.rollback_revision == '' && matrix.target == 'win-x64' && steps.candidate_compatibility.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/canary.mjs \
+            --config toolchain-canary.json \
+            --smoke-report .toolchain/results/candidate-win-x64.json \
+            --previous-state .toolchain/results/no-candidate-canary-state.json \
+            --output-dir .toolchain/candidate-canary
+
+      - name: Diagnostic yt-dlp
+        id: diagnostic_ytdlp
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-yt-dlp.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-yt-dlp/$TARGET" \
+            --report ".toolchain/results/diagnostic-yt-dlp-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-yt-dlp-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-yt-dlp-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-yt-dlp-compatibility/$TARGET"
+
+      - name: Diagnostic Deno
+        id: diagnostic_deno
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-deno.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-deno/$TARGET" \
+            --report ".toolchain/results/diagnostic-deno-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-deno-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-deno-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-deno-compatibility/$TARGET"
+
+      - name: Diagnostic FFmpeg
+        id: diagnostic_ffmpeg
+        if: ${{ steps.baseline_smoke.outcome == 'success' && steps.baseline_compatibility.outcome == 'success' && (steps.candidate_smoke.outcome != 'success' || steps.candidate_compatibility.outcome != 'success') }}
+        continue-on-error: true
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          smoke="src-tauri/target/debug/toolchain-smoke"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then smoke="${smoke}.exe"; fi
+          "$smoke" --manifest .toolchain/manifests/diagnostic-ffmpeg.json \
+            --target "$TARGET" --root "$RUNNER_TEMP/diagnostic-ffmpeg/$TARGET" \
+            --report ".toolchain/results/diagnostic-ffmpeg-${TARGET}.json"
+          node scripts/toolchain/compatibility.mjs \
+            --smoke-report ".toolchain/results/diagnostic-ffmpeg-${TARGET}.json" \
+            --report ".toolchain/results/diagnostic-ffmpeg-compatibility-${TARGET}.json" \
+            --work-root "$RUNNER_TEMP/diagnostic-ffmpeg-compatibility/$TARGET"
+
+      - name: Run project tests
+        id: project_tests
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          status=0
+          npm test || status=1
+          npm run build || status=1
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --lib || status=1
+          cargo check --locked --manifest-path src-tauri/Cargo.toml || status=1
+          exit "$status"
+
+      - name: Create target validation report
+        if: ${{ always() }}
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          RUNNER_LABEL: ${{ matrix.runner }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          BASELINE_SMOKE: ${{ steps.baseline_smoke.outcome }}
+          BASELINE_COMPATIBILITY: ${{ steps.baseline_compatibility.outcome }}
+          CANDIDATE_BUNDLE: ${{ steps.verify_candidate.outcome }}
+          CANDIDATE_SMOKE: ${{ steps.candidate_smoke.outcome }}
+          CANDIDATE_COMPATIBILITY: ${{ steps.candidate_compatibility.outcome }}
+          PROJECT_TESTS: ${{ steps.project_tests.outcome }}
+          DIAGNOSTIC_YTDLP: ${{ steps.diagnostic_ytdlp.outcome }}
+          DIAGNOSTIC_DENO: ${{ steps.diagnostic_deno.outcome }}
+          DIAGNOSTIC_FFMPEG: ${{ steps.diagnostic_ffmpeg.outcome }}
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+          import {
+            canonicalValidationJson,
+            createTargetReport,
+          } from "./scripts/toolchain/validation-report.mjs";
+
+          const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+          const target = process.env.TARGET;
+          const rollbackRevision = process.env.ROLLBACK_REVISION.trim();
+          const manifest = readJson(".toolchain/manifests/runtime-candidate.json");
+          const lock = readJson(".toolchain/manifests/candidate-lock.json");
+          const manifestTarget = manifest.targets.find((item) => item.target === target);
+          if (!manifestTarget) throw new Error(`Candidate manifest is missing ${target}`);
+          const smokePath = `.toolchain/results/candidate-${target}.json`;
+          const smoke = existsSync(smokePath) ? readJson(smokePath) : null;
+          const statusByName = new Map((smoke?.tools ?? []).map((tool) => [tool.name, tool]));
+          const tools = manifestTarget.tools.map((tool) => ({
+            name: tool.name,
+            version: statusByName.get(tool.name)?.version ?? tool.version,
+          }));
+          let assets;
+          let extractedHashes;
+          if (rollbackRevision) {
+            const historicalValidation = readJson(
+              ".toolchain/manifests/historical-validation.json",
+            );
+            const historicalTarget = historicalValidation.targets.find(
+              (item) => item.target === target,
+            );
+            if (!historicalTarget) {
+              throw new Error(`Historical validation is missing ${target}`);
+            }
+            assets = historicalTarget.assets;
+            extractedHashes = historicalTarget.extractedHashes;
+          } else {
+            const matchingAssets = lock.sources.flatMap((source) =>
+              source.assets
+                .filter((asset) => asset.target === target)
+                .map((asset) => ({ sourceId: source.id, asset })),
+            );
+            assets = matchingAssets.map(({ sourceId, asset }) => ({
+              sourceId,
+              releaseId: asset.releaseId,
+              assetId: asset.assetId,
+              assetName: asset.assetName,
+              sourceUrl: asset.sourceUrl,
+              size: asset.size,
+              officialSha256: asset.sha256,
+            }));
+            extractedHashes = matchingAssets.flatMap(({ asset }) =>
+              asset.members.map((member) => ({
+                tool: member.tool,
+                path: member.path,
+                sha256: member.sha256,
+              })),
+            );
+          }
+          const diagnostics = [
+            ["yt-dlp", process.env.DIAGNOSTIC_YTDLP],
+            ["deno", process.env.DIAGNOSTIC_DENO],
+            ["ffmpeg", process.env.DIAGNOSTIC_FFMPEG],
+          ]
+            .filter(([, outcome]) => outcome === "success" || outcome === "failure")
+            .map(([sourceUnit, outcome]) => ({
+              sourceUnit,
+              success: outcome === "success",
+              summary: `Diagnostic ${outcome}`,
+            }));
+          if (
+            process.env.BASELINE_SMOKE !== "success" ||
+            process.env.BASELINE_COMPATIBILITY !== "success"
+          ) {
+            diagnostics.push({
+              sourceUnit: "baseline",
+              success: false,
+              summary: "Infrastructure baseline failed",
+            });
+          }
+          const checks = {
+            supplyChain:
+              smoke !== null &&
+              (Boolean(rollbackRevision) || process.env.CANDIDATE_BUNDLE === "success"),
+            executables: process.env.CANDIDATE_SMOKE === "success",
+            dash: process.env.CANDIDATE_COMPATIBILITY === "success",
+            projectTests: process.env.PROJECT_TESTS === "success",
+          };
+          let canary;
+          if (target === "win-x64") {
+            const observationsPath = ".toolchain/candidate-canary/canary-observations.json";
+            if (existsSync(observationsPath)) {
+              const observations = readJson(observationsPath);
+              canary = {
+                status: observations.every((observation) => observation.ok)
+                  ? "passing"
+                  : "failing",
+                blocking: false,
+              };
+            } else if (process.env.CANDIDATE_COMPATIBILITY === "success") {
+              canary = { status: "unavailable", blocking: false };
+            }
+          }
+          const report = createTargetReport({
+            target,
+            success: Object.values(checks).every(Boolean),
+            runnerImage:
+              [process.env.ImageOS, process.env.ImageVersion].filter(Boolean).join("@") ||
+              process.env.RUNNER_LABEL,
+            architecture: process.env.ARCHITECTURE,
+            checks,
+            tools,
+            assets,
+            extractedHashes,
+            diagnostics,
+            canary,
+          });
+          mkdirSync(".toolchain/target-reports", { recursive: true });
+          writeFileSync(
+            `.toolchain/target-reports/${target}.json`,
+            canonicalValidationJson(report),
+            "utf8",
+          );
+          NODE
+
+      - name: Upload target report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-target-${{ matrix.target }}
+          path: .toolchain/target-reports/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  toolchain-validation:
+    name: toolchain-validation
+    if: ${{ always() }}
+    needs: [prepare-candidate, validate-native]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+
+      - name: Download target reports
+        id: download_reports
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: toolchain-target-*
+          path: .toolchain/downloaded-reports
+          merge-multiple: true
+
+      - name: Merge and validate native reports
+        id: aggregate
+        continue-on-error: true
+        env:
+          COMMIT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_REPOSITORY: Chlience/yt-dlp-tauri-toolchain
+          ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+          CANDIDATE_ARTIFACT_NAME: ${{ needs.prepare-candidate.outputs.artifact_name }}
+          CANDIDATE_ARTIFACT_ID: ${{ needs.prepare-candidate.outputs.artifact_id }}
+          CANDIDATE_ARTIFACT_DIGEST: ${{ needs.prepare-candidate.outputs.artifact_digest }}
+          CANDIDATE_REPOSITORY_ID: ${{ needs.prepare-candidate.outputs.repository_id }}
+          CANDIDATE_PULL_REQUEST: ${{ needs.prepare-candidate.outputs.pull_request }}
+          CANDIDATE_HEAD_SHA: ${{ needs.prepare-candidate.outputs.head_sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+          import { join } from "node:path";
+          import {
+            downloadVerifiedReleaseAsset,
+            fetchToolchainRevisionRelease,
+            verifyArchiveManifestBytes,
+          } from "./scripts/toolchain/archive-channel.mjs";
+          import {
+            canonicalValidationJson,
+            mergeTargetReports,
+            validatePublicationReport,
+          } from "./scripts/toolchain/validation-report.mjs";
+
+          const reportDirectory = ".toolchain/downloaded-reports";
+          const names = (await readdir(reportDirectory)).filter((name) => name.endsWith(".json"));
+          const reports = await Promise.all(
+            names.map(async (name) =>
+              JSON.parse(await readFile(join(reportDirectory, name), "utf8")),
+            ),
+          );
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const rollbackRevision = process.env.ROLLBACK_REVISION.trim();
+          let context;
+          if (rollbackRevision) {
+            const releaseTag = `toolchain-${rollbackRevision}`;
+            const release = await fetchToolchainRevisionRelease({
+              revision: rollbackRevision,
+              token: process.env.GH_TOKEN,
+              repository: process.env.ARCHIVE_REPOSITORY,
+              userAgent: "yt-dlp-tauri-toolchain-revalidation",
+            });
+            if (release.tag_name !== releaseTag || release.immutable !== true) {
+              throw new Error(`Historical archive release ${releaseTag} is not immutable`);
+            }
+            const downloadAsset = async (name) => {
+              return downloadVerifiedReleaseAsset({
+                release,
+                name,
+                token: process.env.GH_TOKEN,
+                repository: process.env.ARCHIVE_REPOSITORY,
+                userAgent: "yt-dlp-tauri-toolchain-revalidation",
+              });
+            };
+            const manifestAsset = await downloadAsset(
+              `tools-manifest-${rollbackRevision}.json`,
+            );
+            const validationAsset = await downloadAsset(
+              `toolchain-validation-${rollbackRevision}.json`,
+            );
+            verifyArchiveManifestBytes(
+              {
+                repository: process.env.ARCHIVE_REPOSITORY,
+                revision: rollbackRevision,
+                releaseTag,
+                sha256: manifestAsset.sha256,
+              },
+              manifestAsset.bytes,
+            );
+            const historicalValidation = JSON.parse(validationAsset.bytes.toString("utf8"));
+            validatePublicationReport(historicalValidation, {
+              revision: rollbackRevision,
+              commitSha: historicalValidation.commitSha,
+              manifestSha256: manifestAsset.sha256,
+              lockSha256: historicalValidation.lockSha256,
+            });
+            context = {
+              revision: rollbackRevision,
+              commitSha: process.env.COMMIT_SHA,
+              manifestSha256: manifestAsset.sha256,
+              lockSha256: historicalValidation.lockSha256,
+              runId: process.env.RUN_ID,
+              runUrl: process.env.RUN_URL,
+            };
+          } else {
+            const lockBytes = await readFile("toolchain-lock.json");
+            const manifestBytes = await readFile("src-tauri/tools-manifest.json");
+            const lock = JSON.parse(lockBytes);
+            context = {
+              revision: lock.revision,
+              commitSha: process.env.COMMIT_SHA,
+              manifestSha256: sha256(manifestBytes),
+              lockSha256: sha256(lockBytes),
+              runId: process.env.RUN_ID,
+              runUrl: process.env.RUN_URL,
+            };
+            if (process.env.CANDIDATE_PULL_REQUEST) {
+              context.candidate = {
+                artifactName: process.env.CANDIDATE_ARTIFACT_NAME,
+                artifactId: process.env.CANDIDATE_ARTIFACT_ID,
+                artifactDigest: process.env.CANDIDATE_ARTIFACT_DIGEST,
+                repositoryId: process.env.CANDIDATE_REPOSITORY_ID,
+                pullRequestNumber: Number(process.env.CANDIDATE_PULL_REQUEST),
+                headSha: process.env.CANDIDATE_HEAD_SHA,
+              };
+            }
+          }
+          const canary = reports.find((report) => report.target === "win-x64")?.canary;
+          if (canary) context.canary = canary;
+          const merged = mergeTargetReports(reports, context);
+          await mkdir(".toolchain/aggregate", { recursive: true });
+          await writeFile(
+            ".toolchain/aggregate/toolchain-validation.json",
+            canonicalValidationJson(merged),
+            "utf8",
+          );
+          validatePublicationReport(merged, context);
+          NODE
+
+      - name: Upload canonical validation report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-validation-report
+          path: .toolchain/aggregate/toolchain-validation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce aggregate result
+        if: ${{ always() }}
+        shell: bash
+        env:
+          DOWNLOAD_OUTCOME: ${{ steps.download_reports.outcome }}
+          AGGREGATE_OUTCOME: ${{ steps.aggregate.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "$DOWNLOAD_OUTCOME" == "success" ]]
+          [[ "$AGGREGATE_OUTCOME" == "success" ]]

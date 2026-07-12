@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.worktrees/
 src-tauri/target
 src-tauri/Tools/win-x64
 src-tauri/Tools/.tmp

@@ -1,6 +1,7 @@
 {
-  "schemaVersion": 2,
-  "retrievedAtUtc": "2026-07-06T07:25:54.471Z",
+  "schemaVersion": 4,
+  "revision": "20260712.1",
+  "retrievedAtUtc": "2026-07-12T00:00:00.000Z",
   "targets": [
     {
       "target": "win-x64",
@@ -8,129 +9,49 @@
         {
           "name": "yt-dlp",
           "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
+          "sourceSize": 18226085,
+          "sourceSha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
           "version": "2026.07.04",
           "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
           "kind": "file",
-          "licenseNotes": "Official Windows standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
+          "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
         },
         {
           "name": "ffmpeg",
           "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
-          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-22-18-32/ffmpeg-N-125157-gefa8b20987-win64-gpl.zip",
-          "version": "N-125157-gefa8b20987-20260622",
-          "sha256": "7fc6c326d1b77022edbd8a539336da00a78da43a165bacdf0050cd7ae3d326f3",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
+          "sourceSize": 167300768,
+          "sourceSha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
+          "version": "autobuild-2026-06-30-16-38",
+          "sha256": "b2663834d9162f6ee431e7d864d8afd7ac385ec289de70463af67beab6f2257e",
           "kind": "zip",
-          "archivePathSuffix": "bin/ffmpeg.exe",
-          "licenseNotes": "License depends on the build; this app uses the win64 gpl build source recommended by yt-dlp docs."
+          "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
+          "archivePathSuffix": "bin/ffmpeg.exe"
         },
         {
           "name": "ffprobe",
           "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
-          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-22-18-32/ffmpeg-N-125157-gefa8b20987-win64-gpl.zip",
-          "version": "N-125157-gefa8b20987-20260622",
-          "sha256": "57416eda9966bff94593ef087aad0eb3e6f94e23303e02eb352a5bd65728ad63",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
+          "sourceSize": 167300768,
+          "sourceSha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
+          "version": "autobuild-2026-06-30-16-38",
+          "sha256": "3a3525df7f7722e3131a2e0a4c22063f4b2ae50e25a3a2008cf1f7b9f3804aaf",
           "kind": "zip",
-          "archivePathSuffix": "bin/ffprobe.exe",
-          "licenseNotes": "Distributed with the same FFmpeg build as ffmpeg.exe."
+          "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
+          "archivePathSuffix": "bin/ffprobe.exe"
         },
         {
           "name": "deno",
           "path": "Tools/win-x64/deno/deno.exe",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.7.14/deno-x86_64-pc-windows-msvc.zip",
-          "version": "2.7.14",
-          "sha256": "b6e83993f1f1ab97075a77043de61118966d719b5450bc631251d47c3a34230b",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
+          "sourceSize": 42721120,
+          "sourceSha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf",
+          "version": "2.9.2",
+          "sha256": "a5270c2bb75a2ec12fef53185730327267d9e9fe6be6a962c5d1d5a050f93c88",
           "kind": "zip",
-          "archivePathSuffix": "deno.exe",
-          "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
-        }
-      ]
-    },
-    {
-      "target": "macos-x64",
-      "tools": [
-        {
-          "name": "yt-dlp",
-          "path": "Tools/macos-x64/yt-dlp/yt-dlp",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp_macos",
-          "version": "2026.07.04",
-          "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b",
-          "kind": "file",
-          "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
-        },
-        {
-          "name": "ffmpeg",
-          "path": "Tools/macos-x64/ffmpeg/bin/ffmpeg",
-          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1778768838_8.1.1/ffmpeg.zip",
-          "version": "8.1.1",
-          "sha256": "6a2c2884161d883fbb1ef21a0223475283eb4e381ee870956719f59f32daf74c",
-          "kind": "zip",
-          "archivePathSuffix": "ffmpeg",
-          "licenseNotes": "Static FFmpeg 8.1.1 build for macOS Intel from Martin Riedl's FFmpeg build server."
-        },
-        {
-          "name": "ffprobe",
-          "path": "Tools/macos-x64/ffmpeg/bin/ffprobe",
-          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/amd64/1778768838_8.1.1/ffprobe.zip",
-          "version": "8.1.1",
-          "sha256": "cb39232c06f663e97917798ed75f7538341367401f9c180f10646193a7a29a54",
-          "kind": "zip",
-          "archivePathSuffix": "ffprobe",
-          "licenseNotes": "Static FFprobe 8.1.1 build for macOS Intel from Martin Riedl's FFmpeg build server."
-        },
-        {
-          "name": "deno",
-          "path": "Tools/macos-x64/deno/deno",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.7.14/deno-x86_64-apple-darwin.zip",
-          "version": "2.7.14",
-          "sha256": "ebdf76dcb4154ac49cb54a6377d91b4b2215a6c40987c21e36eb993b04de6345",
-          "kind": "zip",
-          "archivePathSuffix": "deno",
-          "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
-        }
-      ]
-    },
-    {
-      "target": "macos-arm64",
-      "tools": [
-        {
-          "name": "yt-dlp",
-          "path": "Tools/macos-arm64/yt-dlp/yt-dlp",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp_macos",
-          "version": "2026.07.04",
-          "sha256": "498bd0dae17855c599d371d68ec5bafc439a9d8640e838be25c765a9792f261b",
-          "kind": "file",
-          "licenseNotes": "Official macOS standalone executable; yt-dlp README notes PyInstaller-bundled executables include GPLv3+ licensed code, making the combined work GPLv3+."
-        },
-        {
-          "name": "ffmpeg",
-          "path": "Tools/macos-arm64/ffmpeg/bin/ffmpeg",
-          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1778761665_8.1.1/ffmpeg.zip",
-          "version": "8.1.1",
-          "sha256": "ef4fe121377039053b0d7bed4a9aa46e7912918f5ba6424a1dd155f4eed625b0",
-          "kind": "zip",
-          "archivePathSuffix": "ffmpeg",
-          "licenseNotes": "Static FFmpeg 8.1.1 build for macOS Apple Silicon from Martin Riedl's FFmpeg build server."
-        },
-        {
-          "name": "ffprobe",
-          "path": "Tools/macos-arm64/ffmpeg/bin/ffprobe",
-          "sourceUrl": "https://ffmpeg.martin-riedl.de/download/macos/arm64/1778761665_8.1.1/ffprobe.zip",
-          "version": "8.1.1",
-          "sha256": "3ec76ddd72068162294249465c36257d6c1add564f9b078e31e173837832967d",
-          "kind": "zip",
-          "archivePathSuffix": "ffprobe",
-          "licenseNotes": "Static FFprobe 8.1.1 build for macOS Apple Silicon from Martin Riedl's FFmpeg build server."
-        },
-        {
-          "name": "deno",
-          "path": "Tools/macos-arm64/deno/deno",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.7.14/deno-aarch64-apple-darwin.zip",
-          "version": "2.7.14",
-          "sha256": "523144333a566adc29f17eebdab6526f592dd95ff0f3f63238054dafc3770a26",
-          "kind": "zip",
-          "archivePathSuffix": "deno",
-          "licenseNotes": "Deno is bundled as the JavaScript runtime for yt-dlp EJS support."
+          "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
+          "archivePathSuffix": "deno.exe"
         }
       ]
     }

@@ -1,8 +1,28 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
+import { generateManifest } from "./toolchain/generate-manifest.mjs";
+
 const DEFAULT_MANIFEST_PATH = "src-tauri/tools-manifest.json";
+const DEFAULT_POLICY_PATH = "toolchain-policy.json";
+const DEFAULT_LOCK_PATH = "toolchain-lock.json";
 const DEFAULT_MAX_ATTEMPTS = 3;
+
+export function selectSourceCheckManifest({
+  sourceMode = "runtime",
+  manifest,
+  policy,
+  lock,
+}) {
+  if (sourceMode === "runtime") return manifest;
+  if (sourceMode === "upstream") {
+    if (!policy || !lock) {
+      throw new Error("Upstream source checks require toolchain policy and lock data");
+    }
+    return generateManifest(policy, lock, { sourceMode: "upstream" });
+  }
+  throw new Error(`Unsupported source check mode: ${sourceMode}`);
+}
 
 function toolReferencesBySourceUrl(manifest) {
   const referencesByUrl = new Map();
@@ -57,14 +77,14 @@ export async function evaluateToolSourceUrls(manifest, checkUrl = checkToolSourc
   };
 }
 
-async function checkUrlWithRetries(url, checkUrl) {
+export async function checkUrlWithRetries(url, checkUrl, maxAttempts = DEFAULT_MAX_ATTEMPTS) {
   let lastResult = {
     ok: false,
     status: undefined,
     statusText: "not checked",
   };
 
-  for (let attempt = 1; attempt <= DEFAULT_MAX_ATTEMPTS; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       lastResult = await checkUrl(url);
     } catch (error) {
@@ -75,7 +95,7 @@ async function checkUrlWithRetries(url, checkUrl) {
       };
     }
 
-    if (lastResult.ok || !isRetryableCheckResult(lastResult) || attempt === DEFAULT_MAX_ATTEMPTS) {
+    if (lastResult.ok || !isRetryableCheckResult(lastResult) || attempt === maxAttempts) {
       return lastResult;
     }
   }
@@ -83,15 +103,15 @@ async function checkUrlWithRetries(url, checkUrl) {
   return lastResult;
 }
 
-function isRetryableCheckResult(result) {
+export function isRetryableCheckResult(result) {
   if (typeof result.status !== "number") {
     return true;
   }
   return result.status === 408 || result.status === 429 || result.status >= 500;
 }
 
-async function checkToolSourceUrl(url) {
-  const response = await fetch(url, {
+export async function checkToolSourceUrl(url, fetchImpl = fetch) {
+  let response = await fetchImpl(url, {
     method: "HEAD",
     redirect: "follow",
     signal: AbortSignal.timeout(20_000),
@@ -99,6 +119,19 @@ async function checkToolSourceUrl(url) {
       "User-Agent": "yt-dlp-tauri-toolchain-check",
     },
   });
+
+  if (response.status === 405 || response.status === 501) {
+    response = await fetchImpl(url, {
+      method: "GET",
+      redirect: "follow",
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        Range: "bytes=0-0",
+        "User-Agent": "yt-dlp-tauri-toolchain-check",
+      },
+    });
+    await response.body?.cancel().catch(() => {});
+  }
 
   return {
     ok: response.ok,
@@ -110,6 +143,9 @@ async function checkToolSourceUrl(url) {
 function parseArgs(argv) {
   const args = {
     manifest: DEFAULT_MANIFEST_PATH,
+    policy: DEFAULT_POLICY_PATH,
+    lock: DEFAULT_LOCK_PATH,
+    sourceMode: "runtime",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -122,6 +158,12 @@ function parseArgs(argv) {
 
     if (flag === "--manifest") {
       args.manifest = value;
+    } else if (flag === "--policy") {
+      args.policy = value;
+    } else if (flag === "--lock") {
+      args.lock = value;
+    } else if (flag === "--source-mode") {
+      args.sourceMode = value;
     } else {
       throw new Error(`Unknown argument: ${flag}`);
     }
@@ -133,7 +175,19 @@ function parseArgs(argv) {
 export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const manifest = JSON.parse(readFileSync(args.manifest, "utf8"));
-  const result = await evaluateToolSourceUrls(manifest);
+  const selectedManifest = selectSourceCheckManifest({
+    sourceMode: args.sourceMode,
+    manifest,
+    policy:
+      args.sourceMode === "upstream"
+        ? JSON.parse(readFileSync(args.policy, "utf8"))
+        : undefined,
+    lock:
+      args.sourceMode === "upstream"
+        ? JSON.parse(readFileSync(args.lock, "utf8"))
+        : undefined,
+  });
+  const result = await evaluateToolSourceUrls(selectedManifest);
 
   if (result.ok) {
     process.stdout.write(`Checked ${result.checkedUrlCount} tool source URLs.\n`);

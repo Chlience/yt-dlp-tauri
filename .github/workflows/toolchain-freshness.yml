@@ -2,45 +2,187 @@ name: Toolchain Freshness
 
 on:
   schedule:
-    - cron: "23 2 * * *"
+    - cron: "41 4 * * *"
   workflow_dispatch:
+    inputs:
+      tool:
+        description: Toolchain source to refresh
+        required: false
+        default: auto
+        type: choice
+        options:
+          - auto
+          - yt-dlp
+          - deno
+          - ffmpeg-windows
+      reason:
+        description: Compatibility or security reason
+        required: false
+        type: string
 
 permissions:
   contents: read
-  pull-requests: read
+
+concurrency:
+  group: toolchain-freshness
+  cancel-in-progress: false
 
 jobs:
-  yt-dlp:
+  detect:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      has_sources: ${{ steps.sources.outputs.has_sources }}
+      sources: ${{ steps.sources.outputs.sources }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
 
-      - name: Check latest yt-dlp release
-        id: check-latest-yt-dlp-release
+      - name: Check released toolchain sources
+        id: freshness
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/check-yt-dlp-release.mjs
+        run: node scripts/check-toolchain-freshness.mjs --json-output freshness.json
 
-      - name: Check open yt-dlp update pull request
-        if: steps.check-latest-yt-dlp-release.outcome == 'failure'
+      - name: Select emergency sources
+        id: sources
         env:
-          GH_TOKEN: ${{ github.token }}
+          MANUAL_SOURCE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tool || 'auto' }}
         run: |
-          pr_number="$(gh pr list --head bot/update-yt-dlp --state open --json number --jq '.[0].number // ""')"
-          if [ -z "$pr_number" ]; then
-            echo "::error::yt-dlp manifest is stale and no bot update PR is open."
+          set -euo pipefail
+          if [ ! -f freshness.json ]; then
+            echo "::error::Freshness diagnostics did not produce freshness.json"
             exit 1
           fi
 
-          echo "::notice::yt-dlp manifest is stale; update PR #${pr_number} is already open."
+          if [ "$MANUAL_SOURCE" != "auto" ]; then
+            jq -e --arg source "$MANUAL_SOURCE" '.sources | any(.id == $source)' toolchain-policy.json > /dev/null
+            sources="$(jq -cn --arg source "$MANUAL_SOURCE" '[$source]')"
+          else
+            sources="$(jq -c '.failedSourceIds | unique | sort' freshness.json)"
+          fi
 
-      - name: Check tool source URLs
-        run: node scripts/check-tool-source-urls.mjs
+          if jq -e '.ok == false' freshness.json > /dev/null && [ "$(jq 'length' <<<"$sources")" -eq 0 ]; then
+            jq -r '.problems[] | "[\(.class)] \(.message)"' freshness.json >&2
+            exit 1
+          fi
+          printf 'sources=%s\n' "$sources" >> "$GITHUB_OUTPUT"
+          if [ "$(jq 'length' <<<"$sources")" -gt 0 ]; then
+            printf 'has_sources=true\n' >> "$GITHUB_OUTPUT"
+          else
+            printf 'has_sources=false\n' >> "$GITHUB_OUTPUT"
+          fi
+
+  emergency:
+    needs: detect
+    if: needs.detect.outputs.has_sources == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        source: ${{ fromJSON(needs.detect.outputs.sources) }}
+
+    steps:
+      - name: Create bot token
+        id: app_token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.TOOLCHAIN_BOT_APP_ID }}
+          private-key: ${{ secrets.TOOLCHAIN_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app_token.outputs.token }}
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve focused candidate
+        id: update
+        env:
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          summary="$(node scripts/update-toolchain.mjs --only "${{ matrix.source }}")"
+          printf '%s\n' "$summary"
+          printf 'changed=%s\n' "$(jq -r '.changed' <<<"$summary")" >> "$GITHUB_OUTPUT"
+          printf 'revision=%s\n' "$(jq -r '.revision' <<<"$summary")" >> "$GITHUB_OUTPUT"
+
+      - name: Test focused candidate
+        if: steps.update.outputs.changed == 'true'
+        run: npm test
+
+      - name: Build focused candidate
+        if: steps.update.outputs.changed == 'true'
+        run: npm run build
+
+      - name: Verify repaired source
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          node scripts/check-toolchain-freshness.mjs --json-output repaired-freshness.json || true
+          if jq -e --arg source "${{ matrix.source }}" '.failedSourceIds | index($source) != null' repaired-freshness.json > /dev/null; then
+            echo "::error::Focused candidate did not repair ${{ matrix.source }}"
+            exit 1
+          fi
+
+      - name: Push emergency candidate branch
+        if: steps.update.outputs.changed == 'true'
+        env:
+          APP_SLUG: ${{ steps.app_token.outputs['app-slug'] }}
+        run: |
+          set -euo pipefail
+          branch="bot/toolchain-emergency-${{ matrix.source }}"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add toolchain-lock.json src-tauri/tools-manifest.json TOOLCHAIN_CHANGELOG.md
+          git commit -m "chore: refresh ${{ matrix.source }} toolchain source" \
+            -m "chore: 刷新 ${{ matrix.source }} 工具链来源"
+          git fetch --prune origin "+refs/heads/${branch}:refs/remotes/origin/${branch}" || true
+          git push --force-with-lease origin "HEAD:refs/heads/${branch}"
+
+      - name: Create or update emergency pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          REVISION: ${{ steps.update.outputs.revision }}
+          PR_REASON: ${{ github.event.inputs.reason || '' }}
+        run: |
+          set -euo pipefail
+          source_id="${{ matrix.source }}"
+          branch="bot/toolchain-emergency-${source_id}"
+          reason="${PR_REASON:-Automated source health failure}"
+          body_file="$RUNNER_TEMP/toolchain-emergency.md"
+          printf '## Emergency toolchain candidate\n\n- Source: `%s`\n- Revision: `%s`\n- Reason: %s\n\nThis PR requires the normal compatibility gates and maintainer review.\n' \
+            "$source_id" "$REVISION" "$reason" > "$body_file"
+          pr_number="$(gh pr list --repo "$GH_REPO" --base main --head "$branch" --state open --json number --jq '.[0].number // ""')"
+          if [ -z "$pr_number" ]; then
+            gh pr create --repo "$GH_REPO" --base main --head "$branch" \
+              --title "chore: refresh ${source_id} toolchain source" --body-file "$body_file"
+          else
+            gh pr edit "$pr_number" --repo "$GH_REPO" \
+              --title "chore: refresh ${source_id} toolchain source" --body-file "$body_file"
+          fi

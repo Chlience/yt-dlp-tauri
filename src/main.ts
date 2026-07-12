@@ -6,7 +6,14 @@ import changelogMarkdown from "../CHANGELOG.md?raw";
 import packageInfo from "../package.json";
 import { releaseNotesForVersion, shouldShowReleaseNotes, stripTerminalSentencePunctuation } from "./release-notes";
 import { thumbnailUrlCandidates } from "./thumbnail";
-import { summarizeTools, type ToolAction, type ToolStatus, type ToolSummaryMode } from "./toolchain";
+import {
+  summarizeRemoteTools,
+  summarizeTools,
+  type RemoteToolManifest,
+  type ToolAction,
+  type ToolStatus,
+  type ToolSummaryMode,
+} from "./toolchain";
 import { type GithubAccessMode, getUpdateStatus, parseGithubHttpError, parseLatestRelease, resolveGithubUrl } from "./update-check";
 
 type VideoFormatOption = {
@@ -31,6 +38,7 @@ type VideoMetadata = {
 type AppState = {
   download_directory: string;
   tools_root: string;
+  toolchain_revision?: string | null;
   cookies_file?: string | null;
 };
 
@@ -46,11 +54,6 @@ type ToolInstallProgress = {
   percent?: number;
   status: string;
   tool?: string;
-};
-
-type LatestToolManifestResult = {
-  status: "available" | "no_release" | "no_manifest";
-  manifestJson?: string | null;
 };
 
 const APP_VERSION = packageInfo.version;
@@ -175,7 +178,7 @@ const translations = {
     "settings.toolUpdatesNoManifest": "The latest release does not include a tool manifest yet.",
     "settings.toolUpdatesInvalidManifest": "The released tool manifest could not be read.",
     "settings.toolUpdatesFailed": "Tool update check failed: {message}",
-    "settings.reinstallConfirm": "Reinstall managed tools at {path}? This removes the tool directory and temporary tool downloads, then downloads verified tools again.",
+    "settings.reinstallConfirm": "Download and verify a fresh toolchain at {path}? The current revision stays active until the replacement passes every check",
     "settings.toolCheckFailed": "Tool check failed.",
     "settings.toolsInstalled": "Toolchain installed.",
     "settings.toolsInstallPartial": "Install finished, but some tools still need attention.",
@@ -313,7 +316,7 @@ const translations = {
     "settings.toolUpdatesNoManifest": "最新发布暂未附带工具清单。",
     "settings.toolUpdatesInvalidManifest": "发布的工具清单无法读取。",
     "settings.toolUpdatesFailed": "工具更新检查失败：{message}",
-    "settings.reinstallConfirm": "重新安装 {path} 下的受管工具？这会删除工具目录和临时工具下载，然后重新下载并校验工具。",
+    "settings.reinstallConfirm": "重新下载并校验 {path} 下的工具链？新版本通过全部检查前会继续使用当前版本",
     "settings.toolCheckFailed": "工具检查失败。",
     "settings.toolsInstalled": "工具链已安装。",
     "settings.toolsInstallPartial": "安装结束，但仍有工具需要处理。",
@@ -359,6 +362,7 @@ const state = {
   lastUrl: "",
   toolsReady: false,
   toolAction: null as ToolAction | null,
+  toolchainRevision: null as string | null,
   pendingToolManifestJson: null as string | null,
   updateChecking: false,
   latestReleaseUrl: "",
@@ -676,6 +680,7 @@ async function loadAppState() {
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
   elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
+  state.toolchainRevision = appState.toolchain_revision ?? null;
   renderCookiesFile(appState.cookies_file ?? null);
 }
 
@@ -712,9 +717,13 @@ async function installTools() {
   elements.toolInstallStatus.textContent = t(toolActionStatusKey(state.toolAction));
   try {
     const tools = state.pendingToolManifestJson
-      ? await invoke<ToolStatus[]>("install_tools_from_manifest", { manifestJson: state.pendingToolManifestJson })
-      : await invoke<ToolStatus[]>("install_tools");
+      ? await invoke<ToolStatus[]>("install_tools_from_manifest", {
+          manifestJson: state.pendingToolManifestJson,
+          githubAccessMode: state.githubAccessMode,
+        })
+      : await invoke<ToolStatus[]>("install_tools", { githubAccessMode: state.githubAccessMode });
     state.pendingToolManifestJson = null;
+    await loadAppState();
     applyToolSummary(tools, "local");
     elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
     showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
@@ -742,7 +751,7 @@ async function checkToolUpdates() {
   }
   elements.toolInstallStatus.textContent = t("settings.toolUpdatesChecking");
   try {
-    const manifestResult = await invoke<LatestToolManifestResult>("fetch_latest_tool_manifest", {
+    const manifestResult = await invoke<RemoteToolManifest>("fetch_latest_tool_manifest", {
       githubAccessMode: state.githubAccessMode,
     });
 
@@ -758,7 +767,11 @@ async function checkToolUpdates() {
       return;
     }
 
-    if (!manifestResult.manifestJson) {
+    if (
+      !manifestResult.manifestJson ||
+      !manifestResult.source ||
+      (manifestResult.source === "archive" && !manifestResult.revision)
+    ) {
       elements.toolInstallStatus.textContent = t("settings.toolUpdatesInvalidManifest");
       showNotice(t("settings.toolUpdatesInvalidManifest"), "warning");
       return;
@@ -766,7 +779,7 @@ async function checkToolUpdates() {
 
     const manifestJson = manifestResult.manifestJson;
     const tools = await invoke<ToolStatus[]>("check_tools_with_manifest", { manifestJson });
-    const summary = applyToolSummary(tools, "remote");
+    const summary = applyToolSummary(tools, "remote", { remoteRevision: manifestResult.revision });
     if (summary.action) {
       state.pendingToolManifestJson = manifestJson;
       updateToolActionButton();
@@ -796,7 +809,11 @@ async function reinstallTools() {
   setBusy(true, undefined, "tools");
   elements.toolInstallStatus.textContent = t("settings.reinstallingTools");
   try {
-    const tools = await invoke<ToolStatus[]>("reinstall_tools", { manifestJson: null });
+    const tools = await invoke<ToolStatus[]>("reinstall_tools", {
+      manifestJson: null,
+      githubAccessMode: state.githubAccessMode,
+    });
+    await loadAppState();
     applyToolSummary(tools, "local");
     elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
     showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
@@ -1171,8 +1188,15 @@ function renderTools(tools: ToolStatus[]) {
   );
 }
 
-function applyToolSummary(tools: ToolStatus[], mode: ToolSummaryMode, options: { quietReady?: boolean } = {}) {
-  const summary = summarizeTools(tools, mode);
+function applyToolSummary(
+  tools: ToolStatus[],
+  mode: ToolSummaryMode,
+  options: { quietReady?: boolean; remoteRevision?: string | null } = {},
+) {
+  const summary =
+    mode === "remote"
+      ? summarizeRemoteTools(tools, state.toolchainRevision, options.remoteRevision ?? null)
+      : summarizeTools(tools, mode);
   state.toolsReady = summary.ready;
   state.toolAction = summary.action;
   renderTools(tools);

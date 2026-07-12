@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { findToolManifestAsset, summarizeTools, type ToolStatus } from "../src/toolchain.ts";
+import {
+  compareToolchainRevisions,
+  summarizeRemoteTools,
+  summarizeTools,
+  type ToolStatus,
+} from "../src/toolchain.ts";
 
 function tool(availability: ToolStatus["availability"], version = "1.0.0", expectedVersion = "1.0.0"): ToolStatus {
   return {
@@ -47,23 +52,24 @@ test("summarizeTools asks for update when release manifest verification finds ne
   });
 });
 
-test("findToolManifestAsset reads the project release manifest asset", () => {
-  assert.deepEqual(
-    findToolManifestAsset({
-      assets: [
-        {
-          name: "yt-dlp-tauri_0.1.8_windows_x86_64-setup.exe",
-          browser_download_url: "https://example.test/app.exe",
-        },
-        {
-          name: "tools-manifest.json",
-          browser_download_url: "https://github.com/Chlience/yt-dlp-tauri/releases/download/v0.1.8/tools-manifest.json",
-        },
-      ],
-    }),
-    {
-      name: "tools-manifest.json",
-      downloadUrl: "https://github.com/Chlience/yt-dlp-tauri/releases/download/v0.1.8/tools-manifest.json",
-    },
+test("remote archive revision produces update only when newer", () => {
+  assert.equal(compareToolchainRevisions("20260712.1", "20260711.2"), 1);
+  assert.equal(compareToolchainRevisions("20260712.1", "20260712.1"), 0);
+  assert.equal(compareToolchainRevisions("20260711.2", "20260712.1"), -1);
+  assert.throws(() => compareToolchainRevisions("20260229.1", "20260712.1"));
+  assert.throws(() => compareToolchainRevisions("20260712.4294967296", "20260712.1"));
+});
+
+test("new archive revision updates matching installed bytes", () => {
+  assert.equal(
+    summarizeRemoteTools([tool("available")], "20260711.2", "20260712.1").action,
+    "update",
+  );
+  assert.equal(
+    summarizeRemoteTools([tool("available")], "20260712.1", "20260712.1").action,
+    null,
+  );
+  assert.throws(() =>
+    summarizeRemoteTools([tool("missing")], null, "20261301.1"),
   );
 });

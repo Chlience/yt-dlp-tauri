@@ -1,0 +1,848 @@
+name: Toolchain Publish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - toolchain-lock.json
+      - src-tauri/tools-manifest.json
+  workflow_dispatch:
+    inputs:
+      rollback_revision:
+        description: "Historical toolchain revision to promote"
+        required: false
+        default: ""
+        type: string
+      reason:
+        description: "Required audit reason for a rollback"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Validate and report a rollback without changing the channel"
+        required: false
+        default: true
+        type: boolean
+      skip_revalidation:
+        description: "Use protected approval instead of native revalidation"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-publish
+  cancel-in-progress: false
+
+jobs:
+  handoff:
+    name: Resolve validated pull request bytes
+    if: ${{ github.ref == 'refs/heads/main' && inputs.rollback_revision == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      candidate_artifact_name: ${{ steps.resolve.outputs.candidate_artifact_name }}
+      candidate_artifact_id: ${{ steps.resolve.outputs.candidate_artifact_id }}
+      candidate_artifact_digest: ${{ steps.resolve.outputs.candidate_artifact_digest }}
+      candidate_repository_id: ${{ steps.resolve.outputs.repository_id }}
+      candidate_pull_request: ${{ steps.resolve.outputs.pull_request }}
+      candidate_head_sha: ${{ steps.resolve.outputs.head_sha }}
+      revision: ${{ steps.resolve.outputs.revision }}
+      relay_artifact_id: ${{ steps.relay.outputs.artifact-id }}
+      relay_artifact_digest: ${{ steps.relay.outputs.artifact-digest }}
+
+    steps:
+      - name: Checkout exact main commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+
+      - name: Resolve exact pull request artifacts
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/resolve-toolchain-artifact.mjs
+
+      - name: Download exact candidate artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ steps.resolve.outputs.candidate_artifact_name }}
+          path: .toolchain/candidate
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Download exact pull request validation report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ steps.resolve.outputs.validation_artifact_name }}
+          path: .toolchain/pr-validation
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.resolve.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify candidate bytes against merged lock
+        env:
+          REPOSITORY_ID: ${{ steps.resolve.outputs.repository_id }}
+          PULL_REQUEST: ${{ steps.resolve.outputs.pull_request }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          node scripts/verify-toolchain-candidate.mjs \
+            --directory .toolchain/candidate \
+            --repository-id "$REPOSITORY_ID" \
+            --pull-request "$PULL_REQUEST" \
+            --head-sha "$HEAD_SHA"
+
+      - name: Verify pull request validation identity
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFile } from "node:fs/promises";
+          import { validatePublicationReport } from "./scripts/toolchain/validation-report.mjs";
+
+          const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const handoff = await readJson(".toolchain/handoff/handoff-report.json");
+          const report = await readJson(".toolchain/pr-validation/toolchain-validation.json");
+          const lockBytes = await readFile("toolchain-lock.json");
+          const manifestBytes = await readFile("src-tauri/tools-manifest.json");
+          if (report.runId !== handoff.runId || report.runUrl !== handoff.runUrl) {
+            throw new Error("Pull request validation report run identity does not match handoff");
+          }
+          if (sha256(lockBytes) !== handoff.lockSha256) {
+            throw new Error("Merged toolchain lock digest changed after handoff resolution");
+          }
+          validatePublicationReport(report, {
+            revision: handoff.revision,
+            commitSha: handoff.headSha,
+            manifestSha256: sha256(manifestBytes),
+            lockSha256: handoff.lockSha256,
+            candidate: {
+              artifactName: handoff.candidateArtifact.name,
+              artifactId: handoff.candidateArtifact.id,
+              artifactDigest: handoff.candidateArtifact.digest,
+              repositoryId: handoff.repositoryId,
+              pullRequestNumber: handoff.pullRequestNumber,
+              headSha: handoff.headSha,
+            },
+          });
+          NODE
+
+      - name: Upload verified candidate to main run
+        id: relay
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ steps.resolve.outputs.candidate_artifact_name }}
+          path: .toolchain/candidate
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Upload artifact handoff report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: toolchain-artifact-handoff-${{ steps.resolve.outputs.revision }}
+          path: .toolchain/handoff/handoff-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  validation:
+    name: Validate candidate
+    needs: handoff
+    if: ${{ always() && !inputs.skip_revalidation && (inputs.rollback_revision != '' || needs.handoff.result == 'success') }}
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/toolchain-validate.yml
+    with:
+      rollback_revision: ${{ inputs.rollback_revision || '' }}
+      candidate_artifact_name: ${{ needs.handoff.outputs.candidate_artifact_name }}
+      candidate_artifact_id: ${{ needs.handoff.outputs.candidate_artifact_id }}
+      candidate_artifact_digest: ${{ needs.handoff.outputs.candidate_artifact_digest }}
+      candidate_repository_id: ${{ needs.handoff.outputs.candidate_repository_id }}
+      candidate_pull_request: ${{ needs.handoff.outputs.candidate_pull_request }}
+      candidate_head_sha: ${{ needs.handoff.outputs.candidate_head_sha }}
+
+  rollback-approval:
+    name: Approve revalidation bypass
+    if: ${{ inputs.rollback_revision != '' && inputs.skip_revalidation }}
+    runs-on: ubuntu-latest
+    environment: toolchain-rollback
+    permissions:
+      contents: read
+    steps:
+      - name: Record protected approval
+        run: echo "Protected rollback revalidation bypass approved"
+
+  publish:
+    name: Publish validated toolchain
+    if: ${{ always() && github.ref == 'refs/heads/main' && (needs.validation.result == 'success' || (inputs.rollback_revision != '' && inputs.skip_revalidation && needs.rollback-approval.result == 'success')) }}
+    needs: [handoff, validation, rollback-approval]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+    env:
+      ARCHIVE_REPOSITORY: Chlience/yt-dlp-tauri-toolchain
+      ARCHIVE_STABLE_TAG: toolchain-stable
+      ROLLBACK_REVISION: ${{ inputs.rollback_revision || '' }}
+      ROLLBACK_REASON: ${{ inputs.reason || '' }}
+      ROLLBACK_DRY_RUN: ${{ inputs.dry_run || false }}
+      SKIP_REVALIDATION: ${{ inputs.skip_revalidation || false }}
+
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+
+      - name: Download canonical validation report
+        if: ${{ !inputs.skip_revalidation }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: toolchain-validation-report
+          path: .toolchain/validation
+
+      - name: Download verified main candidate
+        if: ${{ inputs.rollback_revision == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.handoff.outputs.candidate_artifact_name }}
+          path: .toolchain/candidate
+
+      - name: Download artifact handoff report
+        if: ${{ inputs.rollback_revision == '' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: toolchain-artifact-handoff-${{ needs.handoff.outputs.revision }}
+          path: .toolchain/handoff
+
+      - name: Check local publication prerequisites
+        env:
+          APP_ID: ${{ secrets.TOOLCHAIN_BOT_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.TOOLCHAIN_BOT_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .toolchain/publication .toolchain/remote
+          [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]
+          main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
+          if [[ "$main_sha" != "$GITHUB_SHA" ]]; then
+            echo "Refusing stale main commit $GITHUB_SHA; current main is $main_sha" >&2
+            exit 1
+          fi
+          if [[ -z "$ROLLBACK_REVISION" ]]; then
+            node scripts/verify-toolchain-candidate.mjs \
+              --directory .toolchain/candidate \
+              --repository-id "${{ needs.handoff.outputs.candidate_repository_id }}" \
+              --pull-request "${{ needs.handoff.outputs.candidate_pull_request }}" \
+              --head-sha "${{ needs.handoff.outputs.candidate_head_sha }}"
+            node scripts/check-toolchain-compliance.mjs
+          else
+            [[ -n "$ROLLBACK_REASON" ]]
+          fi
+          if [[ "$SKIP_REVALIDATION" == "true" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/environments/toolchain-rollback" \
+              > .toolchain/publication/rollback-environment.json
+            jq -e '
+              .protection_rules
+              | any(.type == "required_reviewers" and (.reviewers | length > 0))
+            ' .toolchain/publication/rollback-environment.json > /dev/null
+          fi
+
+      - name: Create archive publisher token
+        id: archive_token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349
+        with:
+          app-id: ${{ secrets.TOOLCHAIN_BOT_APP_ID }}
+          private-key: ${{ secrets.TOOLCHAIN_BOT_PRIVATE_KEY }}
+          owner: Chlience
+          repositories: yt-dlp-tauri-toolchain
+          permission-administration: read
+          permission-contents: write
+          permission-metadata: read
+
+      - name: Check archive publication prerequisites
+        env:
+          ARCHIVE_TOKEN: ${{ steps.archive_token.outputs.token }}
+          MAIN_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export GH_TOKEN="$ARCHIVE_TOKEN"
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}" > .toolchain/remote/archive-repository.json
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/tags/${ARCHIVE_STABLE_TAG}" \
+            > .toolchain/remote/stable-release.json
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/immutable-releases" \
+            > .toolchain/remote/immutable-releases.json
+          gh api --paginate --slurp -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases?per_page=100" \
+            | jq 'add' > .toolchain/remote/archive-releases.json
+          GH_TOKEN="$MAIN_TOKEN" gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            > .toolchain/remote/application-release.json
+
+          jq -e '.visibility == "public"' \
+            .toolchain/remote/archive-repository.json > /dev/null
+          jq -e '
+            .tag_name == "toolchain-stable" and
+            .draft == false and
+            .prerelease == true and
+            .immutable == false
+          ' .toolchain/remote/stable-release.json > /dev/null
+          jq -e '.enabled == true' \
+            .toolchain/remote/immutable-releases.json > /dev/null
+
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const releases = JSON.parse(await readFile(
+            ".toolchain/remote/archive-releases.json",
+            "utf8",
+          ));
+          const rollbackRevision = process.env.ROLLBACK_REVISION.trim();
+          const revision = rollbackRevision || JSON.parse(
+            await readFile("toolchain-lock.json", "utf8"),
+          ).revision;
+          const tag = `toolchain-${revision}`;
+          const matches = releases.filter((release) => release.tag_name === tag);
+          if (rollbackRevision) {
+            if (matches.length !== 1) {
+              throw new Error(`Rollback requires exactly one archive release ${tag}`);
+            }
+            await writeFile(
+              ".toolchain/remote/revision-release.json",
+              `${JSON.stringify(matches[0], null, 2)}\n`,
+            );
+          } else {
+            if (matches.length !== 0) {
+              throw new Error(`Archive revision release ${tag} already exists`);
+            }
+            await writeFile(".toolchain/remote/revision-release.json", "null\n");
+          }
+          const historical = releases.filter(
+            (release) =>
+              /^toolchain-[0-9]{8}\.[1-9][0-9]*$/u.test(release.tag_name) &&
+              release.draft === false &&
+              release.prerelease === true &&
+              release.immutable === true,
+          );
+          await writeFile(
+            ".toolchain/remote/historical-releases.json",
+            `${JSON.stringify(historical, null, 2)}\n`,
+          );
+          NODE
+
+      - name: Resolve rollback revision assets
+        id: rollback_assets
+        if: ${{ inputs.rollback_revision != '' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+          const release = JSON.parse(await readFile(
+            ".toolchain/remote/revision-release.json",
+            "utf8",
+          ));
+          const revision = process.env.ROLLBACK_REVISION;
+          const select = (name) => {
+            const matches = release.assets.filter((asset) => asset.name === name);
+            if (matches.length !== 1) throw new Error(`Expected one revision asset ${name}`);
+            return matches[0];
+          };
+          const manifest = select(`tools-manifest-${revision}.json`);
+          const validation = select(`toolchain-validation-${revision}.json`);
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            [
+              `manifest_asset_id=${manifest.id}`,
+              `validation_asset_id=${validation.id}`,
+            ].join("\n") + "\n",
+          );
+          NODE
+
+      - name: Download rollback revision metadata
+        if: ${{ inputs.rollback_revision != '' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/assets/${{ steps.rollback_assets.outputs.manifest_asset_id }}" \
+            > .toolchain/publication/historical-tools-manifest.json
+          gh api -H "Accept: application/octet-stream" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/assets/${{ steps.rollback_assets.outputs.validation_asset_id }}" \
+            > .toolchain/publication/historical-validation.json
+
+      - name: Prepare publication input
+        if: ${{ inputs.rollback_revision == '' }}
+        run: node scripts/prepare-toolchain-publication.mjs
+
+      - name: Prepare rollback input
+        if: ${{ inputs.rollback_revision != '' }}
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { existsSync } from "node:fs";
+          import { readFile, writeFile } from "node:fs/promises";
+          const readJson = async (path) => JSON.parse(await readFile(path, "utf8"));
+          const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+          const revision = process.env.ROLLBACK_REVISION;
+          const release = await readJson(".toolchain/remote/revision-release.json");
+          const historicalReleases = await readJson(
+            ".toolchain/remote/historical-releases.json",
+          );
+          const stableRelease = await readJson(".toolchain/remote/stable-release.json");
+          const applicationRelease = await readJson(
+            ".toolchain/remote/application-release.json",
+          );
+          const manifestBytes = await readFile(
+            ".toolchain/publication/historical-tools-manifest.json",
+          );
+          const validationBytes = await readFile(
+            ".toolchain/publication/historical-validation.json",
+          );
+          const manifestName = `tools-manifest-${revision}.json`;
+          const validationName = `toolchain-validation-${revision}.json`;
+          const releaseAsset = (name) => {
+            const matches = release.assets.filter((asset) => asset.name === name);
+            if (matches.length !== 1) throw new Error(`Expected one revision asset ${name}`);
+            return matches[0];
+          };
+          const descriptor = (asset, bytes, contentName) => {
+            const digest = sha256(bytes);
+            const expected = String(asset.digest ?? "").replace(/^sha256:/u, "");
+            if (bytes.length !== asset.size || digest !== expected) {
+              throw new Error(`${asset.name} differs from immutable release metadata`);
+            }
+            return {
+              name: asset.name,
+              size: bytes.length,
+              sha256: digest,
+              [contentName]: JSON.parse(bytes),
+            };
+          };
+          const manifest = descriptor(releaseAsset(manifestName), manifestBytes, "value");
+          const validation = descriptor(
+            releaseAsset(validationName),
+            validationBytes,
+            "report",
+          );
+          const skipRevalidation = process.env.SKIP_REVALIDATION === "true";
+          const input = {
+            mode: "rollback",
+            sourceRepository: process.env.GITHUB_REPOSITORY,
+            archiveRepository: process.env.ARCHIVE_REPOSITORY,
+            rollbackRevision: revision,
+            currentCommitSha: process.env.GITHUB_SHA,
+            reason: process.env.ROLLBACK_REASON,
+            actor: process.env.ACTOR,
+            dryRun: process.env.ROLLBACK_DRY_RUN === "true",
+            skipRevalidation,
+            stableRelease: { ...stableRelease, repository: process.env.ARCHIVE_REPOSITORY },
+            applicationRelease: {
+              ...applicationRelease,
+              repository: process.env.GITHUB_REPOSITORY,
+            },
+            revisionRelease: { ...release, repository: process.env.ARCHIVE_REPOSITORY },
+            historicalReleases: historicalReleases.map((item) => ({
+              ...item,
+              repository: process.env.ARCHIVE_REPOSITORY,
+            })),
+            manifest,
+            validation,
+            ...(skipRevalidation
+              ? { approval: { approved: true, environment: "toolchain-rollback" } }
+              : {
+                  revalidation: {
+                    report: await readJson(
+                      ".toolchain/validation/toolchain-validation.json",
+                    ),
+                  },
+                }),
+          };
+          await writeFile(
+            ".toolchain/publication/publication-input.json",
+            `${JSON.stringify(input, null, 2)}\n`,
+          );
+          NODE
+
+      - name: Build and validate publication plan
+        id: publication_plan
+        run: |
+          set -euo pipefail
+          node scripts/publish-toolchain.mjs \
+            --input .toolchain/publication/publication-input.json \
+            --output .toolchain/publication/publication-plan.json
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            [
+              `mode=${plan.mode}`,
+              `revision=${plan.revision}`,
+              `release_tag=${plan.releaseTag ?? ""}`,
+              `dry_run=${plan.dryRun ?? false}`,
+            ].join("\n") + "\n",
+          );
+          NODE
+
+      - name: Create immutable revision draft
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          await writeFile(".toolchain/publication/release-notes.md", plan.draftRelease.body);
+          NODE
+          gh release create "$RELEASE_TAG" \
+            --repo "$ARCHIVE_REPOSITORY" \
+            --draft \
+            --prerelease \
+            --latest=false \
+            --title "Toolchain ${{ steps.publication_plan.outputs.revision }}" \
+            --notes-file .toolchain/publication/release-notes.md
+
+      - name: Upload planned draft assets
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > .toolchain/publication/upload-operations.tsv
+          import { readFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          for (const operation of plan.operations) {
+            if (operation.kind === "upload") {
+              process.stdout.write(
+                `.toolchain/candidate/${operation.path}\t${operation.descriptor.assetName}\n`,
+              );
+            } else if (operation.kind === "metadata") {
+              process.stdout.write(`${operation.path}\t${operation.asset.name}\n`);
+            }
+          }
+          NODE
+          while IFS=$'\t' read -r path name; do
+            [[ -f "$path" ]]
+            gh release upload "$RELEASE_TAG" "$path#$name" \
+              --repo "$ARCHIVE_REPOSITORY"
+          done < .toolchain/publication/upload-operations.tsv
+
+      - name: Verify every draft asset
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          ARCHIVE_TOKEN: ${{ steps.archive_token.outputs.token }}
+          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+        run: |
+          GH_TOKEN="$ARCHIVE_TOKEN" gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > .toolchain/publication/draft-release.json
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFile } from "node:fs/promises";
+          import { verifyUploadedAsset } from "./scripts/publish-toolchain.mjs";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const release = JSON.parse(await readFile(
+            ".toolchain/publication/draft-release.json",
+            "utf8",
+          ));
+          if (
+            release.tag_name !== plan.releaseTag ||
+            release.draft !== true ||
+            release.prerelease !== true ||
+            release.immutable !== false
+          ) {
+            throw new Error("Revision draft identity is invalid");
+          }
+          const expected = plan.operations.find(
+            (operation) => operation.kind === "publish-release",
+          ).requiredDraftAssets;
+          if (release.assets.length !== expected.length) {
+            throw new Error("Revision draft contains an unexpected asset count");
+          }
+          for (const descriptor of expected) {
+            const matches = release.assets.filter((asset) => asset.name === descriptor.name);
+            if (matches.length !== 1) throw new Error(`Expected one draft asset ${descriptor.name}`);
+            const asset = matches[0];
+            const response = await fetch(asset.url, {
+              headers: {
+                Accept: "application/octet-stream",
+                Authorization: `Bearer ${process.env.ARCHIVE_TOKEN}`,
+                "User-Agent": "yt-dlp-tauri-archive-verifier",
+                "X-GitHub-Api-Version": "2026-03-10",
+              },
+              redirect: "follow",
+            });
+            if (!response.ok || !response.body) {
+              throw new Error(`${asset.name} authenticated download failed: ${response.status}`);
+            }
+            const hash = createHash("sha256");
+            let size = 0;
+            for await (const chunk of response.body) {
+              hash.update(chunk);
+              size += chunk.length;
+            }
+            verifyUploadedAsset(
+              { ...asset, size, sha256: hash.digest("hex") },
+              descriptor,
+            );
+          }
+          NODE
+
+      - name: Publish immutable revision
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+        run: |
+          release_id="$(jq -r '.id' .toolchain/publication/draft-release.json)"
+          node --input-type=module <<'NODE'
+          import { writeFile } from "node:fs/promises";
+          await writeFile(
+            ".toolchain/publication/publish-release.json",
+            `${JSON.stringify({ draft: false, prerelease: true, make_latest: "false" })}\n`,
+          );
+          NODE
+          gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${release_id}" \
+            --input .toolchain/publication/publish-release.json \
+            > .toolchain/publication/published-release.json
+
+      - name: Verify immutable revision
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            > .toolchain/publication/immutable-release.json
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          const release = JSON.parse(await readFile(
+            ".toolchain/publication/immutable-release.json",
+            "utf8",
+          ));
+          if (release.draft !== false || release.immutable !== true) {
+            throw new Error("Published revision release is not immutable");
+          }
+          NODE
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            if gh release verify "$RELEASE_TAG" --repo "$ARCHIVE_REPOSITORY"; then
+              verified=true
+              break
+            fi
+            sleep $((attempt * 3))
+          done
+          [[ "$verified" == "true" ]]
+
+      - name: Promote stable channel
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const operation = plan.operations.find((item) => item.kind === "promote-channel");
+          await writeFile(
+            ".toolchain/publication/channel-patch.json",
+            `${JSON.stringify({ body: operation.releaseBody })}\n`,
+          );
+          NODE
+          stable_id="$(jq -r '.id' .toolchain/remote/stable-release.json)"
+          gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${stable_id}" \
+            --input .toolchain/publication/channel-patch.json \
+            > .toolchain/publication/promoted-channel.json
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { parseChannelRecord } from "./scripts/toolchain/channel.mjs";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const release = JSON.parse(await readFile(
+            ".toolchain/publication/promoted-channel.json",
+            "utf8",
+          ));
+          const expected = plan.operations.find((item) => item.kind === "promote-channel");
+          if (
+            String(release.id) !== expected.releaseId ||
+            release.immutable !== false ||
+            JSON.stringify(parseChannelRecord(release.body)) !== JSON.stringify(expected.channel)
+          ) {
+            throw new Error("Promoted archive channel differs from the publication plan");
+          }
+          NODE
+
+      - name: Promote rollback channel
+        if: ${{ steps.publication_plan.outputs.mode == 'rollback' && steps.publication_plan.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.archive_token.outputs.token }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const operation = plan.operations.find((item) => item.kind === "promote-channel");
+          await writeFile(
+            ".toolchain/publication/rollback-channel-patch.json",
+            `${JSON.stringify({ body: operation.releaseBody })}\n`,
+          );
+          NODE
+          stable_id="$(jq -r '.id' .toolchain/remote/stable-release.json)"
+          gh api --method PATCH -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${stable_id}" \
+            --input .toolchain/publication/rollback-channel-patch.json \
+            > .toolchain/publication/rollback-promoted-channel.json
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+          import { parseChannelRecord } from "./scripts/toolchain/channel.mjs";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const release = JSON.parse(await readFile(
+            ".toolchain/publication/rollback-promoted-channel.json",
+            "utf8",
+          ));
+          const expected = plan.operations.find((item) => item.kind === "promote-channel");
+          if (
+            String(release.id) !== expected.releaseId ||
+            release.immutable !== false ||
+            JSON.stringify(parseChannelRecord(release.body)) !== JSON.stringify(expected.channel)
+          ) {
+            throw new Error("Promoted rollback channel differs from the validated plan");
+          }
+          NODE
+
+      - name: Update v0.1.11 compatibility
+        if: ${{ steps.publication_plan.outputs.mode == 'publish' || (steps.publication_plan.outputs.mode == 'rollback' && steps.publication_plan.outputs.dry_run != 'true') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release_tag="$(jq -r '.operations[] | select(.kind == "legacy-manifest") | .applicationReleaseTag' .toolchain/publication/publication-plan.json)"
+          manifest_path="$(jq -r 'if .mode == "publish" then (.operations[] | select(.kind == "legacy-manifest") | .path) else ".toolchain/publication/historical-tools-manifest.json" end' .toolchain/publication/publication-plan.json)"
+          gh release upload "$release_tag" \
+            "${manifest_path}#tools-manifest.json" \
+            --clobber --repo "$GITHUB_REPOSITORY"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
+            > .toolchain/publication/application-release-after-upload.json
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { readFile } from "node:fs/promises";
+          import { verifyUploadedAsset } from "./scripts/publish-toolchain.mjs";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          const operation = plan.operations.find((item) => item.kind === "legacy-manifest");
+          const release = JSON.parse(await readFile(
+            ".toolchain/publication/application-release-after-upload.json",
+            "utf8",
+          ));
+          if (
+            String(release.id) !== operation.applicationReleaseId ||
+            release.tag_name !== operation.applicationReleaseTag
+          ) {
+            throw new Error("Latest application release changed during publication");
+          }
+          const matches = release.assets.filter((asset) => asset.name === "tools-manifest.json");
+          if (matches.length !== 1) throw new Error("Compatibility manifest is ambiguous");
+          const response = await fetch(matches[0].url, {
+            headers: {
+              Accept: "application/octet-stream",
+              Authorization: `Bearer ${process.env.GH_TOKEN}`,
+              "User-Agent": "yt-dlp-tauri-compatibility-verifier",
+            },
+            redirect: "follow",
+          });
+          if (!response.ok || !response.body) {
+            throw new Error(`Compatibility manifest download failed: ${response.status}`);
+          }
+          const hash = createHash("sha256");
+          let size = 0;
+          for await (const chunk of response.body) {
+            hash.update(chunk);
+            size += chunk.length;
+          }
+          verifyUploadedAsset(
+            {
+              ...matches[0],
+              name: "tools-manifest.json",
+              size,
+              sha256: hash.digest("hex"),
+            },
+            { ...operation.manifestSource, name: "tools-manifest.json" },
+          );
+          NODE
+
+      - name: Record rollback decision
+        if: ${{ steps.publication_plan.outputs.mode == 'rollback' }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFile, readFile } from "node:fs/promises";
+          const plan = JSON.parse(await readFile(
+            ".toolchain/publication/publication-plan.json",
+            "utf8",
+          ));
+          await appendFile(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              plan.dryRun ? "## Rollback dry run" : "## Toolchain rollback",
+              "",
+              `- Revision: \`${plan.revision}\``,
+              `- Reason: ${plan.reason}`,
+              `- Actor: \`${plan.actor}\``,
+              `- Native revalidation: ${plan.revalidated ? "completed" : "protected bypass"}`,
+              "",
+            ].join("\n"),
+          );
+          NODE

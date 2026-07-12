@@ -1,0 +1,152 @@
+{
+  "schemaVersion": 2,
+  "targets": [
+    "win-x64"
+  ],
+  "sources": [
+    {
+      "id": "deno",
+      "adapter": "github-release",
+      "selection": "latest-stable",
+      "repository": "denoland/deno",
+      "version": "v2.9.2",
+      "assets": [
+        {
+          "target": "win-x64",
+          "releaseId": 350916208,
+          "releaseTag": "v2.9.2",
+          "releasePublishedAtUtc": "2026-07-08T14:36:21Z",
+          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.2",
+          "assetId": 470252608,
+          "assetName": "deno-x86_64-pc-windows-msvc.zip",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.2/deno-x86_64-pc-windows-msvc.zip",
+          "kind": "zip",
+          "size": 42721120,
+          "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf",
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
+            "size": 42721120,
+            "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf"
+          },
+          "members": [
+            {
+              "tool": "deno",
+              "path": "Tools/win-x64/deno/deno.exe",
+              "size": 99115808,
+              "sha256": "a5270c2bb75a2ec12fef53185730327267d9e9fe6be6a962c5d1d5a050f93c88",
+              "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
+              "archivePathSuffix": "deno.exe",
+              "archivePath": "deno.exe"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ffmpeg-windows",
+      "adapter": "github-release",
+      "selection": "previous-complete-month",
+      "repository": "yt-dlp/FFmpeg-Builds",
+      "version": "autobuild-2026-06-30-16-38",
+      "assets": [
+        {
+          "target": "win-x64",
+          "releaseId": 346969279,
+          "releaseTag": "autobuild-2026-06-30-16-38",
+          "releasePublishedAtUtc": "2026-06-30T16:38:32Z",
+          "releaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-06-30-16-38",
+          "assetId": 462330428,
+          "assetName": "ffmpeg-N-125365-g9a01c1cb6a-win64-gpl.zip",
+          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-30-16-38/ffmpeg-N-125365-g9a01c1cb6a-win64-gpl.zip",
+          "kind": "zip",
+          "size": 167300768,
+          "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
+            "size": 167300768,
+            "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7"
+          },
+          "members": [
+            {
+              "tool": "ffmpeg",
+              "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
+              "size": 143315456,
+              "sha256": "b2663834d9162f6ee431e7d864d8afd7ac385ec289de70463af67beab6f2257e",
+              "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
+              "archivePathSuffix": "bin/ffmpeg.exe",
+              "archivePath": "ffmpeg-N-125365-g9a01c1cb6a-win64-gpl/bin/ffmpeg.exe"
+            },
+            {
+              "tool": "ffprobe",
+              "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
+              "size": 143109632,
+              "sha256": "3a3525df7f7722e3131a2e0a4c22063f4b2ae50e25a3a2008cf1f7b9f3804aaf",
+              "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
+              "archivePathSuffix": "bin/ffprobe.exe",
+              "archivePath": "ffmpeg-N-125365-g9a01c1cb6a-win64-gpl/bin/ffprobe.exe"
+            }
+          ]
+        }
+      ],
+      "redistribution": {
+        "archiveEligible": true,
+        "provenance": {
+          "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-06-30-16-38",
+          "binarySha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
+          "ffmpegSourceRevision": "9a01c1cb6a4cf87529fe9898b66ec55c5b032639",
+          "buildRepositoryRevision": "76a8795c5a71c26a8a6c35eb5f83d213c5d1dd58",
+          "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-30-16-38/checksums.sha256",
+          "checksumSha256": "59c625d2b2ab19d9c5269649f2eeaf263d51a1e016e7fd8823e844dc96ccfc96",
+          "licenseFiles": [
+            "LICENSE",
+            "THIRD-PARTY-NOTICES.md"
+          ]
+        }
+      }
+    },
+    {
+      "id": "yt-dlp",
+      "adapter": "github-release",
+      "selection": "latest-stable",
+      "repository": "yt-dlp/yt-dlp",
+      "version": "2026.07.04",
+      "assets": [
+        {
+          "target": "win-x64",
+          "releaseId": 349050911,
+          "releaseTag": "2026.07.04",
+          "releasePublishedAtUtc": "2026-07-04T22:41:44Z",
+          "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.04",
+          "assetId": 466665334,
+          "assetName": "yt-dlp.exe",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe",
+          "kind": "file",
+          "size": 18226085,
+          "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
+            "size": 18226085,
+            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
+          },
+          "members": [
+            {
+              "tool": "yt-dlp",
+              "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
+              "size": 18226085,
+              "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+              "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "revision": "20260712.1",
+  "generatedAtUtc": "2026-07-12T00:00:00.000Z"
+}

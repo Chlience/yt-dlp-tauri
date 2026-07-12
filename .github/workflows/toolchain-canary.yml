@@ -1,0 +1,254 @@
+name: Toolchain Canary
+
+on:
+  schedule:
+    - cron: "53 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: toolchain-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        with:
+          workspaces: src-tauri -> target
+          key: toolchain-canary-win-x64
+
+      - name: Resolve promoted stable manifest
+        id: stable_manifest
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE_REPOSITORY: Chlience/yt-dlp-tauri-toolchain
+          ARCHIVE_CHANNEL_TAG: toolchain-stable
+        run: |
+          set -euo pipefail
+          mkdir -p .canary
+          node --input-type=module <<'NODE'
+          import { appendFile, writeFile } from "node:fs/promises";
+          import { fetchStableToolchainManifest } from "./scripts/toolchain/archive-channel.mjs";
+
+          if (process.env.ARCHIVE_CHANNEL_TAG !== "toolchain-stable") {
+            throw new Error("Unexpected archive channel tag");
+          }
+          const stable = await fetchStableToolchainManifest({
+            token: process.env.GH_TOKEN,
+            repository: process.env.ARCHIVE_REPOSITORY,
+            userAgent: "yt-dlp-tauri-toolchain-canary",
+          });
+          if (stable.status === "missing") {
+            await appendFile(process.env.GITHUB_OUTPUT, "fallback=true\n", "utf8");
+          } else {
+            if (stable.release.immutable !== true) {
+              throw new Error(`Archive release ${stable.channel.releaseTag} is mutable`);
+            }
+            await writeFile(".canary/stable-manifest.json", stable.bytes);
+            await appendFile(
+              process.env.GITHUB_OUTPUT,
+              `fallback=false\nrelease_tag=${stable.channel.releaseTag}\n`,
+              "utf8",
+            );
+          }
+          NODE
+
+      - name: Use checked-in manifest before first promotion
+        if: ${{ steps.stable_manifest.outputs.fallback == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .canary
+          cp src-tauri/tools-manifest.json .canary/stable-manifest.json
+
+      - name: Build native smoke binary
+        id: build_smoke
+        continue-on-error: true
+        run: cargo build --locked --manifest-path src-tauri/Cargo.toml --bin toolchain-smoke
+
+      - name: Install promoted stable toolchain
+        id: smoke
+        if: ${{ steps.build_smoke.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .canary
+          src-tauri/target/debug/toolchain-smoke.exe \
+            --manifest .canary/stable-manifest.json \
+            --target win-x64 \
+            --root "$RUNNER_TEMP/toolchain-canary" \
+            --report .canary/smoke-report.json
+
+      - name: Find newest prior Canary state
+        id: previous_state
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { appendFile } from "node:fs/promises";
+
+          const response = await fetch(
+            `https://api.github.com/repos/${process.env.GH_REPO}/actions/artifacts?name=canary-state&per_page=100`,
+            {
+              headers: {
+                Accept: "application/vnd.github+json",
+                Authorization: `Bearer ${process.env.GH_TOKEN}`,
+                "User-Agent": "yt-dlp-tauri-toolchain-canary",
+                "X-GitHub-Api-Version": "2022-11-28",
+              },
+            },
+          );
+          if (!response.ok) throw new Error(`Canary artifact lookup failed: ${response.status}`);
+          const payload = await response.json();
+          const artifact = payload.artifacts.find(
+            (item) =>
+              !item.expired && String(item.workflow_run?.id) !== process.env.CURRENT_RUN_ID,
+          );
+          await appendFile(
+            process.env.GITHUB_OUTPUT,
+            `run_id=${artifact?.workflow_run?.id ?? ""}\n`,
+            "utf8",
+          );
+          NODE
+
+      - name: Download prior Canary state
+        if: ${{ steps.previous_state.outputs.run_id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: canary-state
+          path: .canary/previous
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.previous_state.outputs.run_id }}
+
+      - name: Run stable Canary and update state
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/toolchain/canary.mjs \
+            --config toolchain-canary.json \
+            --smoke-report .canary/smoke-report.json \
+            --previous-state .canary/previous/canary-state.json \
+            --output-dir .canary/output
+
+      - name: Create, update, or close deduplicated Canary issues
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
+
+          const actions = JSON.parse(
+            await readFile(".canary/output/canary-issue-actions.json", "utf8"),
+          );
+          const config = JSON.parse(await readFile("toolchain-canary.json", "utf8"));
+          const operationById = new Map(config.sites.map((site) => [site.id, site.operation]));
+          const headers = {
+            Accept: "application/vnd.github+json",
+            Authorization: `Bearer ${process.env.GH_TOKEN}`,
+            "Content-Type": "application/json",
+            "User-Agent": "yt-dlp-tauri-toolchain-canary",
+            "X-GitHub-Api-Version": "2022-11-28",
+          };
+          const api = `https://api.github.com/repos/${process.env.GH_REPO}`;
+
+          async function request(path, options = {}) {
+            const response = await fetch(`${api}${path}`, { headers, ...options });
+            if (!response.ok) {
+              throw new Error(`GitHub issue request failed: ${response.status} ${path}`);
+            }
+            return response.status === 204 ? null : response.json();
+          }
+
+          const issues = [];
+          for (let page = 1; page <= 10; page += 1) {
+            const batch = await request(`/issues?state=all&per_page=100&page=${page}`);
+            issues.push(...batch.filter((issue) => !issue.pull_request));
+            if (batch.length < 100) break;
+          }
+
+          for (const action of actions) {
+            const title = `[Toolchain Canary] ${action.id}`;
+            const issue = issues.find((candidate) => candidate.title === title);
+            if (action.action === "close") {
+              if (issue?.state === "open") {
+                await request(`/issues/${issue.number}/comments`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    body: `Recovered after ${action.failureClass} failures`,
+                  }),
+                });
+                await request(`/issues/${issue.number}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ state: "closed" }),
+                });
+              }
+              continue;
+            }
+
+            const body = [
+              "A public-site toolchain Canary has failed repeatedly",
+              "",
+              `- Site ID: \`${action.id}\``,
+              `- Operation: \`${operationById.get(action.id)}\``,
+              `- Failure class: \`${action.failureClass}\``,
+              `- Consecutive failures: \`${action.count}\``,
+              "",
+              "Canary status is non-blocking and contains no cookies, credentials, or local paths",
+            ].join("\n");
+            if (issue) {
+              await request(`/issues/${issue.number}`, {
+                method: "PATCH",
+                body: JSON.stringify({ title, body, state: "open" }),
+              });
+            } else {
+              const created = await request("/issues", {
+                method: "POST",
+                body: JSON.stringify({ title, body }),
+              });
+              issues.push(created);
+            }
+          }
+          NODE
+
+      - name: Upload next Canary state
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: canary-state
+          path: .canary/output
+          if-no-files-found: error
+          retention-days: 90

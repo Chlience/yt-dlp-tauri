@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 2,
+  "targets": [
+    "win-x64"
+  ],
+  "approvedHosts": [
+    "api.github.com",
+    "github.com",
+    "release-assets.githubusercontent.com",
+    "objects.githubusercontent.com"
+  ],
+  "sources": [
+    {
+      "id": "yt-dlp",
+      "adapter": "github-release",
+      "repository": "yt-dlp/yt-dlp",
+      "selection": "latest-stable",
+      "archive": {
+        "enabled": true,
+        "repository": "Chlience/yt-dlp-tauri-toolchain",
+        "assetNameTemplate": "{source}-{version}-{assetStem}-{sha256Prefix}{extension}"
+      },
+      "redistribution": {
+        "licenseFiles": [
+          "LICENSE"
+        ],
+        "requiredEvidence": [
+          "binary-release",
+          "source-revision",
+          "source-license",
+          "third-party-notices"
+        ],
+        "noticeFiles": [
+          "THIRD-PARTY-NOTICES.md"
+        ]
+      },
+      "assets": [
+        {
+          "target": "win-x64",
+          "assetName": "yt-dlp.exe",
+          "kind": "file",
+          "members": [
+            {
+              "tool": "yt-dlp",
+              "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
+              "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deno",
+      "adapter": "github-release",
+      "repository": "denoland/deno",
+      "selection": "latest-stable",
+      "archive": {
+        "enabled": true,
+        "repository": "Chlience/yt-dlp-tauri-toolchain",
+        "assetNameTemplate": "{source}-{version}-{assetStem}-{sha256Prefix}{extension}"
+      },
+      "redistribution": {
+        "licenseFiles": [
+          "third-party/deno/LICENSE.md"
+        ],
+        "requiredEvidence": [
+          "binary-release",
+          "source-revision",
+          "source-license",
+          "third-party-notices"
+        ],
+        "noticeFiles": [
+          "THIRD-PARTY-NOTICES.md"
+        ]
+      },
+      "assets": [
+        {
+          "target": "win-x64",
+          "assetName": "deno-x86_64-pc-windows-msvc.zip",
+          "kind": "zip",
+          "members": [
+            {
+              "tool": "deno",
+              "path": "Tools/win-x64/deno/deno.exe",
+              "archivePathSuffix": "deno.exe",
+              "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ffmpeg-windows",
+      "adapter": "github-release",
+      "repository": "yt-dlp/FFmpeg-Builds",
+      "selection": "previous-complete-month",
+      "archive": {
+        "enabled": true,
+        "repository": "Chlience/yt-dlp-tauri-toolchain",
+        "assetNameTemplate": "{source}-{version}-{assetStem}-{sha256Prefix}{extension}"
+      },
+      "redistribution": {
+        "licenseFiles": [
+          "LICENSE",
+          "THIRD-PARTY-NOTICES.md"
+        ],
+        "requiredEvidence": [
+          "official-checksum",
+          "binary-release",
+          "source-revision",
+          "build-revision",
+          "source-license",
+          "third-party-notices"
+        ],
+        "noticeFiles": [
+          "THIRD-PARTY-NOTICES.md",
+          "docs/ffmpeg-redistribution.md"
+        ]
+      },
+      "assets": [
+        {
+          "target": "win-x64",
+          "assetPattern": "^ffmpeg-N-[0-9]+-g[a-f0-9]+-win64-gpl\\.zip$",
+          "kind": "zip",
+          "members": [
+            {
+              "tool": "ffmpeg",
+              "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
+              "archivePathSuffix": "bin/ffmpeg.exe",
+              "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability."
+            },
+            {
+              "tool": "ffprobe",
+              "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
+              "archivePathSuffix": "bin/ffprobe.exe",
+              "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

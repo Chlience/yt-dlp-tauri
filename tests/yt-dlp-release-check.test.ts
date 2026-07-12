@@ -2,41 +2,58 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import * as ytDlpReleaseCheck from "../scripts/check-yt-dlp-release.mjs";
+import { evaluateYtDlpManifest } from "../scripts/check-yt-dlp-release.mjs";
+import { generateManifest } from "../scripts/toolchain/generate-manifest.mjs";
 
-const { evaluateYtDlpManifest } = ytDlpReleaseCheck;
+function lockFixture() {
+  return JSON.parse(readFileSync("tests/fixtures/toolchain/current-lock.json", "utf8"));
+}
 
-const latestRelease = JSON.parse(readFileSync("tests/fixtures/yt-dlp-latest-release.json", "utf8"));
+function manifestFixture(lock = lockFixture()) {
+  return generateManifest(
+    {
+      targets: lock.targets,
+      sources: lock.sources.map((source) => ({ id: source.id })),
+    },
+    lock,
+  );
+}
 
-test("production yt-dlp manifest matches the latest checked release fixture", () => {
-  const manifest = JSON.parse(readFileSync("src-tauri/tools-manifest.json", "utf8"));
+test("yt-dlp manifest matches the unified lock", () => {
+  const lock = lockFixture();
 
-  assert.deepEqual(evaluateYtDlpManifest(manifest, latestRelease), {
+  assert.deepEqual(evaluateYtDlpManifest(manifestFixture(lock), lock), {
     ok: true,
-    latestVersion: "2026.07.04",
+    lockedVersion: "2026.07.04",
     problems: [],
   });
 });
 
-test("stale yt-dlp manifest reports actionable problems", () => {
-  const manifest = JSON.parse(readFileSync("src-tauri/tools-manifest.json", "utf8"));
-  const winYtDlp = manifest.targets[0].tools.find((tool: { name: string }) => tool.name === "yt-dlp");
+test("stale yt-dlp manifest reports actionable lock differences", () => {
+  const lock = lockFixture();
+  const manifest = manifestFixture(lock);
+  const winYtDlp = manifest.targets
+    .find((target) => target.target === "win-x64")
+    .tools.find((tool) => tool.name === "yt-dlp");
   winYtDlp.version = "2026.03.17";
-  winYtDlp.sourceUrl = "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp.exe";
+  winYtDlp.sourceUrl =
+    "https://github.com/yt-dlp/yt-dlp/releases/download/2026.03.17/yt-dlp.exe";
   winYtDlp.sha256 = "3db811b366b2da47337d2fcfdfe5bbd9a258dad3f350c54974f005df115a1545";
 
-  const result = evaluateYtDlpManifest(manifest, latestRelease);
+  const result = evaluateYtDlpManifest(manifest, lock);
 
   assert.equal(result.ok, false);
-  assert.match(result.problems.join("\n"), /win-x64 yt-dlp version is 2026\.03\.17, expected 2026\.07\.04/);
-  assert.match(result.problems.join("\n"), /win-x64 yt-dlp sourceUrl is stale/);
-  assert.match(result.problems.join("\n"), /win-x64 yt-dlp sha256 is stale/);
+  assert.match(result.problems.join("\n"), /win-x64 yt-dlp version is 2026\.03\.17/);
+  assert.match(result.problems.join("\n"), /sourceUrl differs from toolchain-lock\.json/);
+  assert.match(result.problems.join("\n"), /sha256 differs from toolchain-lock\.json/);
 });
 
-test("latest yt-dlp release request uses bearer authentication when a token is available", () => {
-  assert.equal(typeof ytDlpReleaseCheck.githubApiHeaders, "function");
+test("yt-dlp diagnostic requires one locked source", () => {
+  const lock = lockFixture();
+  lock.sources = lock.sources.filter((source) => source.id !== "yt-dlp");
 
-  const headers = ytDlpReleaseCheck.githubApiHeaders("github-token");
-
-  assert.equal(headers.Authorization, "Bearer github-token");
+  assert.throws(
+    () => evaluateYtDlpManifest(manifestFixture(lockFixture()), lock),
+    /exactly one yt-dlp source/,
+  );
 });

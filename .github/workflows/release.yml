@@ -29,14 +29,6 @@ jobs:
             platform: windows-latest
             rust-target: ""
             tauri-args: "--bundles nsis"
-          - name: macOS Intel DMG
-            platform: macos-15-intel
-            rust-target: x86_64-apple-darwin
-            tauri-args: "--target x86_64-apple-darwin --bundles dmg"
-          - name: macOS Apple Silicon DMG
-            platform: macos-15
-            rust-target: aarch64-apple-darwin
-            tauri-args: "--target aarch64-apple-darwin --bundles dmg"
 
     steps:
       - name: Checkout

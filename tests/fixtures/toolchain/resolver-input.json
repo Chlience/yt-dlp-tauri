@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "githubReleases": {
+    "yt-dlp/yt-dlp": [
+      {
+        "id": 110,
+        "tagName": "2026.07.10",
+        "draft": false,
+        "prerelease": false,
+        "publishedAt": "2026-07-10T10:05:00Z",
+        "htmlUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.10",
+        "assets": [
+          {
+            "id": 1100,
+            "name": "yt-dlp.exe",
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.10/yt-dlp.exe",
+            "size": 101,
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ]
+      }
+    ],
+    "denoland/deno": [
+      {
+        "id": 210,
+        "tagName": "v2.8.0",
+        "draft": false,
+        "prerelease": false,
+        "publishedAt": "2026-07-09T08:05:00Z",
+        "htmlUrl": "https://github.com/denoland/deno/releases/tag/v2.8.0",
+        "assets": [
+          {
+            "id": 2100,
+            "name": "deno-x86_64-pc-windows-msvc.zip",
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.0/deno-x86_64-pc-windows-msvc.zip",
+            "size": 201,
+            "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        ]
+      }
+    ],
+    "yt-dlp/FFmpeg-Builds": [
+      {
+        "id": 310,
+        "tagName": "autobuild-2026-06-30-16-38",
+        "draft": false,
+        "prerelease": false,
+        "publishedAt": "2026-06-30T16:38:32Z",
+        "htmlUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-06-30-16-38",
+        "assets": [
+          {
+            "id": 3100,
+            "name": "ffmpeg-N-125200-gabcdef1234-win64-gpl.zip",
+            "url": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-30-16-38/ffmpeg-N-125200-gabcdef1234-win64-gpl.zip",
+            "size": 301,
+            "sha256": null
+          }
+        ]
+      }
+    ]
+  },
+  "inspections": {
+    "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.10/yt-dlp.exe": {
+      "size": 101,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "members": [
+        {
+          "tool": "yt-dlp",
+          "archivePath": null,
+          "size": 101,
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    "https://github.com/denoland/deno/releases/download/v2.8.0/deno-x86_64-pc-windows-msvc.zip": {
+      "size": 201,
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "members": [
+        {
+          "tool": "deno",
+          "archivePath": "deno.exe",
+          "size": 81,
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+        }
+      ]
+    },
+    "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-30-16-38/ffmpeg-N-125200-gabcdef1234-win64-gpl.zip": {
+      "size": 301,
+      "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "members": [
+        {
+          "tool": "ffmpeg",
+          "archivePath": "ffmpeg-build/bin/ffmpeg.exe",
+          "size": 91,
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444"
+        },
+        {
+          "tool": "ffprobe",
+          "archivePath": "ffmpeg-build/bin/ffprobe.exe",
+          "size": 92,
+          "sha256": "5555555555555555555555555555555555555555555555555555555555555555"
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "ffmpeg-windows": {
+      "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-06-30-16-38",
+      "binarySha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "ffmpegSourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "buildRepositoryRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-06-30-16-38/checksums.sha256",
+      "checksumSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "licenseFiles": [
+        "LICENSE",
+        "THIRD-PARTY-NOTICES.md"
+      ]
+    }
+  }
+}

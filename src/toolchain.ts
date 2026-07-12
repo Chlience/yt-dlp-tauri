@@ -11,6 +11,13 @@ export type ToolStatus = {
 export type ToolAction = "install" | "update" | "reinstall";
 export type ToolSummaryMode = "local" | "remote";
 
+export type RemoteToolManifest = {
+  status: "available" | "no_release" | "no_manifest";
+  manifestJson: string | null;
+  revision: string | null;
+  source: "archive" | "legacy" | null;
+};
+
 export type ToolSummary = {
   ready: boolean;
   action: ToolAction | null;
@@ -23,13 +30,6 @@ export type ToolSummary = {
   eventKey: "event.toolsAvailable" | "event.toolsMissing" | "event.toolsDamaged" | "event.toolUpdatesAvailable";
   tone: "success" | "warning";
 };
-
-export type ToolManifestAsset = {
-  name: string;
-  downloadUrl: string;
-};
-
-const TOOL_MANIFEST_ASSET_NAME = "tools-manifest.json";
 
 export function summarizeTools(tools: ToolStatus[], mode: ToolSummaryMode): ToolSummary {
   const hasMissing = tools.some((tool) => tool.availability === "missing");
@@ -90,28 +90,73 @@ export function summarizeTools(tools: ToolStatus[], mode: ToolSummaryMode): Tool
   };
 }
 
-export function findToolManifestAsset(payload: unknown): ToolManifestAsset | null {
-  if (!payload || typeof payload !== "object") {
-    return null;
+export function summarizeRemoteTools(
+  tools: ToolStatus[],
+  localRevision: string | null,
+  remoteRevision: string | null,
+): ToolSummary {
+  if (remoteRevision) {
+    compareToolchainRevisions(remoteRevision, remoteRevision);
+  }
+  if (localRevision) {
+    compareToolchainRevisions(localRevision, localRevision);
+  }
+  const summary = summarizeTools(tools, "remote");
+  if (summary.action || !remoteRevision) {
+    return summary;
+  }
+  const newer = localRevision === null || compareToolchainRevisions(remoteRevision, localRevision) > 0;
+  if (!newer) {
+    return summary;
   }
 
-  const assets = (payload as Record<string, unknown>).assets;
-  if (!Array.isArray(assets)) {
-    return null;
+  return {
+    ready: false,
+    action: "update",
+    settingsKey: "settings.toolUpdatesAvailable",
+    noticeKey: "notice.toolsOutdated",
+    eventKey: "event.toolUpdatesAvailable",
+    tone: "warning",
+  };
+}
+
+export function compareToolchainRevisions(left: string, right: string): -1 | 0 | 1 {
+  const leftParts = parseToolchainRevision(left);
+  const rightParts = parseToolchainRevision(right);
+  if (leftParts.date !== rightParts.date) {
+    return leftParts.date < rightParts.date ? -1 : 1;
+  }
+  if (leftParts.sequence === rightParts.sequence) {
+    return 0;
+  }
+  return leftParts.sequence < rightParts.sequence ? -1 : 1;
+}
+
+function parseToolchainRevision(value: string): { date: string; sequence: bigint } {
+  const match = /^(\d{4})(\d{2})(\d{2})\.([1-9]\d*)$/u.exec(value);
+  if (!match) {
+    throw new Error(`Invalid toolchain revision: ${value}`);
+  }
+  const [, yearText, monthText, dayText, sequenceText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year === 0 || month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]) {
+    throw new Error(`Invalid toolchain revision: ${value}`);
   }
 
-  for (const asset of assets) {
-    if (!asset || typeof asset !== "object") {
-      continue;
-    }
-    const record = asset as Record<string, unknown>;
-    if (record.name === TOOL_MANIFEST_ASSET_NAME && typeof record.browser_download_url === "string") {
-      return {
-        name: TOOL_MANIFEST_ASSET_NAME,
-        downloadUrl: record.browser_download_url,
-      };
-    }
-  }
+  return {
+    date: `${yearText}${monthText}${dayText}`,
+    sequence: parseRevisionSequence(sequenceText, value),
+  };
+}
 
-  return null;
+function parseRevisionSequence(sequenceText: string, revision: string): bigint {
+  const sequence = BigInt(sequenceText);
+  if (sequence > 4_294_967_295n) {
+    throw new Error(`Invalid toolchain revision: ${revision}`);
+  }
+  return sequence;
 }
