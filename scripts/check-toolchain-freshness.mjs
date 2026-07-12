@@ -9,6 +9,7 @@ import {
   ArchiveChannelError,
   fetchStableToolchainManifest,
 } from "./toolchain/archive-channel.mjs";
+import { compareToolchainRevisions } from "./toolchain/channel.mjs";
 
 const DEFAULT_LOCK_PATH = "toolchain-lock.json";
 const DEFAULT_MANIFEST_PATH = "src-tauri/tools-manifest.json";
@@ -67,10 +68,21 @@ function addArchiveUrl(urls, tool, manifest, issue, label) {
     issue(`${label} has an invalid archive URL: ${value}`);
     return;
   }
-  const prefix = `/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-${manifest.revision}/`;
-  const assetName = parsed.pathname.startsWith(prefix)
+  const prefix = "/Chlience/yt-dlp-tauri-toolchain/releases/download/";
+  const sourcePath = parsed.pathname.startsWith(prefix)
     ? parsed.pathname.slice(prefix.length)
     : "";
+  const separator = sourcePath.indexOf("/");
+  const releaseTag = separator > 0 ? sourcePath.slice(0, separator) : "";
+  const assetName = separator > 0 ? sourcePath.slice(separator + 1) : "";
+  const sourceRevision = releaseTag.startsWith("toolchain-")
+    ? releaseTag.slice("toolchain-".length)
+    : "";
+  let validSourceRevision = false;
+  try {
+    validSourceRevision =
+      compareToolchainRevisions(sourceRevision, manifest.revision) <= 0;
+  } catch {}
   if (
     parsed.protocol !== "https:" ||
     parsed.hostname !== "github.com" ||
@@ -78,10 +90,13 @@ function addArchiveUrl(urls, tool, manifest, issue, label) {
     parsed.password ||
     parsed.search ||
     parsed.hash ||
+    !validSourceRevision ||
     !assetName ||
     assetName.includes("/")
   ) {
-    issue(`${label} must use its immutable archive revision URL: ${value}`);
+    issue(
+      `${label} must use an immutable archive revision URL no newer than ${manifest.revision}: ${value}`,
+    );
     return;
   }
   if (!Number.isSafeInteger(tool.sourceSize) || tool.sourceSize <= 0) {

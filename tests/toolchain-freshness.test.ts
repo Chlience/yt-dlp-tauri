@@ -90,6 +90,40 @@ test("freshness attributes a mirrored runtime URL to its lock source", async () 
   assert.match(result.problems[0].message, /toolchain-stable\/ffmpeg-win\.zip/);
 });
 
+test("freshness accepts historical archive revisions and rejects future ones", async () => {
+  const lock = lockFixture();
+  const manifest = manifestFixture(lock);
+  manifest.revision = "20260711.1";
+  const healthy = await evaluateToolchainFreshness(lock, manifest, async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+  }));
+
+  assert.deepEqual(healthy, { ok: true, failedSourceIds: [], problems: [] });
+
+  const future = structuredClone(manifest);
+  for (const target of future.targets) {
+    for (const tool of target.tools) {
+      tool.sourceUrl = tool.sourceUrl.replace(
+        /toolchain-[0-9]{8}\.[1-9][0-9]*/u,
+        "toolchain-20260712.1",
+      );
+    }
+  }
+  const invalid = await evaluateToolchainFreshness(lock, future, async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+  }));
+
+  assert.deepEqual(invalid.failedSourceIds, ["ffmpeg-windows", "yt-dlp"]);
+  assert.equal(
+    invalid.problems.every((problem) => problem.class === "archive-integrity"),
+    true,
+  );
+});
+
 test("freshness reports a manifest tool missing from its locked source", async () => {
   const lock = lockFixture();
   const manifest = manifestFixture(lock);
