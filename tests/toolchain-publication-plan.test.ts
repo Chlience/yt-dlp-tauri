@@ -318,6 +318,45 @@ test("publication reuses historical descriptors and uploads proposed descriptors
   assert.equal(plan.operations.at(-1)?.applicationReleaseTag, "v0.1.11");
 });
 
+test("publication resumes only an exact mutable revision draft", () => {
+  const initialPlan = createArchivePublicationPlan(publicationFixture());
+  const revisionDraft = {
+    repository: archiveRepository,
+    id: 404,
+    tag_name: `toolchain-${revision}`,
+    name: initialPlan.draftRelease.name,
+    body: initialPlan.draftRelease.body,
+    draft: true,
+    prerelease: true,
+    immutable: false,
+    assets: [],
+  };
+  const resumed = createArchivePublicationPlan(
+    publicationFixture({ revisionRelease: revisionDraft }),
+  );
+
+  assert.equal(resumed.draftRelease.existingId, "404");
+
+  assert.throws(
+    () =>
+      createArchivePublicationPlan(
+        publicationFixture({
+          revisionRelease: { ...revisionDraft, body: `${revisionDraft.body}\nstale` },
+        }),
+      ),
+    /draft.*does not match/iu,
+  );
+  assert.throws(
+    () =>
+      createArchivePublicationPlan(
+        publicationFixture({
+          revisionRelease: { ...revisionDraft, draft: false, immutable: true },
+        }),
+      ),
+    /resumable draft/iu,
+  );
+});
+
 test("publication requires one exact candidate byte object", () => {
   assert.throws(
     () => createArchivePublicationPlan(publicationFixture({ candidateFiles: [] })),

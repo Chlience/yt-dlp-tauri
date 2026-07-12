@@ -335,10 +335,22 @@ jobs:
               `${JSON.stringify(matches[0], null, 2)}\n`,
             );
           } else {
-            if (matches.length !== 0) {
-              throw new Error(`Archive revision release ${tag} already exists`);
+            if (matches.length > 1) {
+              throw new Error(`Archive revision release ${tag} is ambiguous`);
             }
-            await writeFile(".toolchain/remote/revision-release.json", "null\n");
+            const revisionRelease = matches[0] ?? null;
+            if (
+              revisionRelease &&
+              (revisionRelease.draft !== true ||
+                revisionRelease.prerelease !== true ||
+                revisionRelease.immutable !== false)
+            ) {
+              throw new Error(`Archive revision release ${tag} is not a resumable draft`);
+            }
+            await writeFile(
+              ".toolchain/remote/revision-release.json",
+              `${JSON.stringify(revisionRelease, null, 2)}\n`,
+            );
           }
           const historical = releases.filter(
             (release) =>
@@ -513,11 +525,13 @@ jobs:
           NODE
 
       - name: Create immutable revision draft
+        id: revision_draft
         if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
         run: |
+          set -euo pipefail
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from "node:fs/promises";
           const plan = JSON.parse(await readFile(
@@ -526,51 +540,55 @@ jobs:
           ));
           await writeFile(".toolchain/publication/release-notes.md", plan.draftRelease.body);
           NODE
-          gh release create "$RELEASE_TAG" \
-            --repo "$ARCHIVE_REPOSITORY" \
-            --draft \
-            --prerelease \
-            --latest=false \
-            --title "Toolchain ${{ steps.publication_plan.outputs.revision }}" \
-            --notes-file .toolchain/publication/release-notes.md
+          release_id="$(jq -r '.draftRelease.existingId // empty' \
+            .toolchain/publication/publication-plan.json)"
+          if [[ -z "$release_id" ]]; then
+            gh release create "$RELEASE_TAG" \
+              --repo "$ARCHIVE_REPOSITORY" \
+              --draft \
+              --prerelease \
+              --latest=false \
+              --title "Toolchain ${{ steps.publication_plan.outputs.revision }}" \
+              --notes-file .toolchain/publication/release-notes.md
+            release_id="$(gh release view "$RELEASE_TAG" \
+              --repo "$ARCHIVE_REPOSITORY" \
+              --json databaseId \
+              --jq '.databaseId')"
+          fi
+          [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${release_id}" \
+            > .toolchain/publication/draft-release.json
+          [[ "$(jq -r '.id' .toolchain/publication/draft-release.json)" == "$release_id" ]]
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
       - name: Upload planned draft assets
         if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
           RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+          RELEASE_ID: ${{ steps.revision_draft.outputs.release_id }}
         run: |
           set -euo pipefail
-          node --input-type=module <<'NODE' > .toolchain/publication/upload-operations.tsv
-          import { readFile } from "node:fs/promises";
-          const plan = JSON.parse(await readFile(
-            ".toolchain/publication/publication-plan.json",
-            "utf8",
-          ));
-          for (const operation of plan.operations) {
-            if (operation.kind === "upload") {
-              process.stdout.write(
-                `.toolchain/candidate/${operation.path}\t${operation.descriptor.assetName}\n`,
-              );
-            } else if (operation.kind === "metadata") {
-              process.stdout.write(`${operation.path}\t${operation.asset.name}\n`);
-            }
-          }
-          NODE
-          while IFS=$'\t' read -r path name; do
+          gh api -H "X-GitHub-Api-Version: 2026-03-10" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${RELEASE_ID}" \
+            > .toolchain/publication/draft-release-before-upload.json
+          node scripts/prepare-toolchain-draft-uploads.mjs
+          while IFS= read -r path; do
             [[ -f "$path" ]]
-            gh release upload "$RELEASE_TAG" "$path#$name" \
+            gh release upload "$RELEASE_TAG" "$path" \
               --repo "$ARCHIVE_REPOSITORY"
-          done < .toolchain/publication/upload-operations.tsv
+          done < <(jq -r '.uploads[].uploadPath' \
+            .toolchain/publication/draft-upload-plan.json)
 
       - name: Verify every draft asset
         if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
         env:
           ARCHIVE_TOKEN: ${{ steps.archive_token.outputs.token }}
-          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+          RELEASE_ID: ${{ steps.revision_draft.outputs.release_id }}
         run: |
           GH_TOKEN="$ARCHIVE_TOKEN" gh api -H "X-GitHub-Api-Version: 2026-03-10" \
-            "repos/${ARCHIVE_REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            "repos/${ARCHIVE_REPOSITORY}/releases/${RELEASE_ID}" \
             > .toolchain/publication/draft-release.json
           node --input-type=module <<'NODE'
           import { createHash } from "node:crypto";
@@ -631,9 +649,10 @@ jobs:
         if: ${{ steps.publication_plan.outputs.mode == 'publish' }}
         env:
           GH_TOKEN: ${{ steps.archive_token.outputs.token }}
-          RELEASE_TAG: ${{ steps.publication_plan.outputs.release_tag }}
+          RELEASE_ID: ${{ steps.revision_draft.outputs.release_id }}
         run: |
-          release_id="$(jq -r '.id' .toolchain/publication/draft-release.json)"
+          release_id="$RELEASE_ID"
+          [[ "$(jq -r '.id' .toolchain/publication/draft-release.json)" == "$release_id" ]]
           node --input-type=module <<'NODE'
           import { writeFile } from "node:fs/promises";
           await writeFile(
@@ -770,8 +789,11 @@ jobs:
           set -euo pipefail
           release_tag="$(jq -r '.operations[] | select(.kind == "legacy-manifest") | .applicationReleaseTag' .toolchain/publication/publication-plan.json)"
           manifest_path="$(jq -r 'if .mode == "publish" then (.operations[] | select(.kind == "legacy-manifest") | .path) else ".toolchain/publication/historical-tools-manifest.json" end' .toolchain/publication/publication-plan.json)"
+          compatibility_path=".toolchain/publication/compatibility/tools-manifest.json"
+          mkdir -p "$(dirname "$compatibility_path")"
+          cp "$manifest_path" "$compatibility_path"
           gh release upload "$release_tag" \
-            "${manifest_path}#tools-manifest.json" \
+            "$compatibility_path" \
             --clobber --repo "$GITHUB_REPOSITORY"
           gh api "repos/${GITHUB_REPOSITORY}/releases/latest" \
             > .toolchain/publication/application-release-after-upload.json

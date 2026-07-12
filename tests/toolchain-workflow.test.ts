@@ -87,8 +87,9 @@ test("publisher validates exact main before promoting immutable assets", () => {
   assert.match(workflow, /releases\/latest/u);
   assert.match(
     workflow,
-    /#tools-manifest\.json"[\s\S]*?--clobber/u,
+    /compatibility\/tools-manifest\.json"[\s\S]*?--clobber/u,
   );
+  assert.doesNotMatch(workflow, /#tools-manifest\.json/u);
   assert.doesNotMatch(workflow, /toolchain-mirror-candidates/u);
 
   const upload = workflow.indexOf("Upload planned draft assets");
@@ -133,6 +134,13 @@ test("publisher verifies draft bytes and immutable release attestation before pr
   assert.match(workflow, /--prerelease/u);
   assert.match(workflow, /--latest=false/u);
   assert.match(workflow, /verifyUploadedAsset/u);
+  assert.match(workflow, /id: revision_draft/u);
+  assert.match(workflow, /prepare-toolchain-draft-uploads\.mjs/u);
+  assert.match(
+    workflow,
+    /RELEASE_ID: \$\{\{ steps\.revision_draft\.outputs\.release_id \}\}/u,
+  );
+  assert.match(workflow, /releases\/\$\{RELEASE_ID\}/u);
   assert.match(workflow, /draft:\s*false/u);
   assert.match(workflow, /\.immutable !== true/u);
   assert.match(
@@ -144,6 +152,7 @@ test("publisher verifies draft bytes and immutable release attestation before pr
     workflow.indexOf("Verify every draft asset"),
   );
   assert.doesNotMatch(draftUploads, /--clobber/u);
+  assert.doesNotMatch(draftUploads, /\$path#\$name/u);
 });
 
 test("main handoff revalidates one exact pull request candidate artifact", () => {

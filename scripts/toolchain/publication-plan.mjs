@@ -246,6 +246,28 @@ function normalizeImmutableRelease(value, expectedTag, label) {
   return { ...release, id, assets };
 }
 
+function normalizeRevisionDraft(value, expectedTag) {
+  const release = requireObject(value, "Archive revision release");
+  requireRepository(
+    release.repository,
+    ARCHIVE_REPOSITORY,
+    "Archive revision release repository",
+  );
+  if (
+    release.tag_name !== expectedTag ||
+    release.draft !== true ||
+    release.prerelease !== true ||
+    release.immutable !== false
+  ) {
+    throw new Error(`Archive revision release ${expectedTag} must be a resumable draft`);
+  }
+  return {
+    id: requireIdentifier(release.id, "Archive revision draft ID"),
+    name: requireString(release.name, "Archive revision draft name"),
+    body: typeof release.body === "string" ? release.body : "",
+  };
+}
+
 function immutableReleaseMap(values) {
   const releases = new Map();
   for (const value of requireArray(values, "Historical releases")) {
@@ -483,9 +505,10 @@ export function createArchivePublicationPlan(inputValue) {
   const revision = requireRevision(input.revision);
   const commitSha = requireCommit(input.commitSha, "Publication commit");
   const proposedTag = archiveReleaseTag(revision);
-  if (input.revisionRelease !== null && input.revisionRelease !== undefined) {
-    throw new Error(`Archive revision release ${proposedTag} already exists`);
-  }
+  const revisionDraft =
+    input.revisionRelease === null || input.revisionRelease === undefined
+      ? null
+      : normalizeRevisionDraft(input.revisionRelease, proposedTag);
   const lockDescriptor = requireObject(input.lock, "Toolchain lock descriptor");
   const lockSha256 = requireSha256(lockDescriptor.sha256, "Toolchain lock SHA-256");
   const lock = requireObject(lockDescriptor.value, "Toolchain lock content");
@@ -599,6 +622,27 @@ export function createArchivePublicationPlan(inputValue) {
       throw new Error(`Duplicate draft release asset name: ${requiredDraftAssets[index].name}`);
     }
   }
+  const draftRelease = {
+    tag: proposedTag,
+    name: `Toolchain ${revision}`,
+    prerelease: true,
+    makeLatest: false,
+    body: releaseNotes({
+      revision,
+      commitSha,
+      handoff,
+      lockSha256,
+      manifestSha256: manifest.sha256,
+      changedSources: input.changedSources,
+    }),
+    existingId: revisionDraft?.id ?? null,
+  };
+  if (
+    revisionDraft &&
+    (revisionDraft.name !== draftRelease.name || revisionDraft.body !== draftRelease.body)
+  ) {
+    throw new Error(`Archive revision draft ${proposedTag} does not match this publication`);
+  }
 
   return {
     schemaVersion: 1,
@@ -609,20 +653,7 @@ export function createArchivePublicationPlan(inputValue) {
     releaseTag: proposedTag,
     commitSha,
     pullRequestNumber: handoff.pullRequestNumber,
-    draftRelease: {
-      tag: proposedTag,
-      name: `Toolchain ${revision}`,
-      prerelease: true,
-      makeLatest: false,
-      body: releaseNotes({
-        revision,
-        commitSha,
-        handoff,
-        lockSha256,
-        manifestSha256: manifest.sha256,
-        changedSources: input.changedSources,
-      }),
-    },
+    draftRelease,
     operations: [
       ...reuse,
       ...upload,
