@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -202,12 +203,26 @@ test("Canary config allows only reviewed public HTTPS URLs", () => {
       schemaVersion: 1,
       sites: [
         {
-          id: "youtube-public",
-          operation: "metadata",
-          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+          id: "vimeo-public",
+          operation: "simulate",
+          url: "https://vimeo.com/76979871",
         },
       ],
     }),
+  );
+  assert.throws(
+    () =>
+      validateCanaryConfig({
+        schemaVersion: 1,
+        sites: [
+          {
+            id: "youtube-public",
+            operation: "metadata",
+            url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+          },
+        ],
+      }),
+    /public HTTPS/u,
   );
   assert.throws(
     () =>
@@ -225,12 +240,26 @@ test("Canary config allows only reviewed public HTTPS URLs", () => {
   );
 });
 
+test("production Canary runs only the reviewed Vimeo target", async () => {
+  const config = JSON.parse(
+    await readFile(new URL("../toolchain-canary.json", import.meta.url), "utf8"),
+  );
+
+  assert.deepEqual(config.sites, [
+    {
+      id: "vimeo-public",
+      operation: "simulate",
+      url: "https://vimeo.com/76979871",
+    },
+  ]);
+});
+
 test("Canary command pins candidate Deno and FFmpeg without cookies", () => {
   const command = canaryCommand(
     {
-      id: "youtube-public",
-      operation: "metadata",
-      url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      id: "vimeo-public",
+      operation: "simulate",
+      url: "https://vimeo.com/76979871",
     },
     {
       ytDlp: "/tools/yt-dlp",
@@ -241,7 +270,7 @@ test("Canary command pins candidate Deno and FFmpeg without cookies", () => {
 
   assert.ok(command.args.includes("deno:/tools/deno"));
   assert.ok(command.args.includes("/tools/ffmpeg/bin"));
-  assert.ok(command.args.includes("--dump-single-json"));
+  assert.ok(command.args.includes("--simulate"));
   assert.doesNotMatch(command.args.join(" "), /cookie|authorization/iu);
 });
 
@@ -251,9 +280,9 @@ test("Canary observations classify 412 and redact query credentials", async () =
       schemaVersion: 1,
       sites: [
         {
-          id: "youtube-public",
-          operation: "metadata",
-          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+          id: "vimeo-public",
+          operation: "simulate",
+          url: "https://vimeo.com/76979871",
         },
       ],
     },
@@ -279,9 +308,9 @@ test("Canary observations distinguish an unavailable target from extractor failu
       schemaVersion: 1,
       sites: [
         {
-          id: "youtube-public",
-          operation: "metadata",
-          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+          id: "vimeo-public",
+          operation: "simulate",
+          url: "https://vimeo.com/76979871",
         },
       ],
     },
@@ -291,7 +320,7 @@ test("Canary observations distinguish an unavailable target from extractor failu
       tools: [{ name: "yt-dlp", full_path: "/tools/yt-dlp" }],
     },
     async () => {
-      throw new Error("ERROR: [youtube] example: Video unavailable");
+      throw new Error("ERROR: [vimeo] example: Video unavailable");
     },
   );
 

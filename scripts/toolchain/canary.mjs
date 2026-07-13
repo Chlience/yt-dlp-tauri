@@ -16,8 +16,6 @@ const ENVIRONMENTAL_FAILURE_CLASSES = new Set([
 const PUBLIC_HOSTS = new Set([
   "vimeo.com",
   "www.vimeo.com",
-  "www.youtube.com",
-  "youtube.com",
 ]);
 const SITE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 

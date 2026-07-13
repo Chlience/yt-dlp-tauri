@@ -279,7 +279,7 @@ The bot keeps the PR open, applies a compatibility-blocked label, and updates on
 
 ## Real-Site Canary
 
-The candidate workflow runs a small public-site metadata and simulated-download Canary with the candidate yt-dlp and Deno configuration. Canary failures are non-blocking because site availability depends on region, cookies, anti-bot behavior, and network conditions.
+The candidate workflow runs a small public-site simulated-download Canary with the candidate yt-dlp and Deno configuration. Canary failures are non-blocking because site availability depends on region, cookies, anti-bot behavior, and network conditions. The reviewed target set excludes YouTube because its anti-automation challenges on GitHub-hosted runners do not provide a stable compatibility signal; YouTube regressions are handled through user reports.
 
 The stable Canary also runs daily at `05:53 UTC`. Three consecutive actionable failures for the same site and failure class create or update one deduplicated GitHub Issue. Actionable classes cover toolchain installation, metadata extraction, simulated download, and an unavailable reviewed target. Authentication challenges, rate limits, HTTP 412 responses, and transient network failures remain visible in the artifacts as environmental outcomes and do not advance the alert counter. A successful or environmental outcome closes a prior actionable alert, while a new actionable failure class updates the existing site Issue without waiting for another three-run threshold.
 
