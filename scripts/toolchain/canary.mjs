@@ -7,6 +7,12 @@ import { runCommand } from "./compatibility.mjs";
 
 const SCHEMA_VERSION = 1;
 const OPERATIONS = new Set(["metadata", "simulate"]);
+const ENVIRONMENTAL_FAILURE_CLASSES = new Set([
+  "authentication",
+  "network",
+  "precondition",
+  "rate-limit",
+]);
 const PUBLIC_HOSTS = new Set([
   "vimeo.com",
   "www.vimeo.com",
@@ -51,17 +57,35 @@ export function nextCanaryState(previous, observations, now = new Date().toISOSt
         alerted: false,
         recoveryPending: hadFailure && wasAlerted,
         recoveredFailureClass: hadFailure && wasAlerted ? prior.failureClass : null,
+        recoveryResolution: hadFailure && wasAlerted ? "success" : null,
       };
       continue;
     }
 
     const failureClass = requireFailureClass(observation?.failureClass);
+    const priorWasAlerted = prior.alerted || prior.count >= 3;
+    if (ENVIRONMENTAL_FAILURE_CLASSES.has(failureClass)) {
+      nextEntries[id] = {
+        id,
+        operation,
+        count: 0,
+        failureClass,
+        firstFailureAtUtc: null,
+        lastFailureAtUtc: updatedAtUtc,
+        recoveryAtUtc: priorWasAlerted ? updatedAtUtc : prior.recoveryAtUtc,
+        alerted: false,
+        recoveryPending: priorWasAlerted,
+        recoveredFailureClass: priorWasAlerted ? prior.failureClass : null,
+        recoveryResolution: priorWasAlerted ? "environmental" : null,
+      };
+      continue;
+    }
+
     const sameSequence =
       prior.count > 0 &&
       prior.failureClass === failureClass &&
       prior.operation === operation;
     const count = sameSequence ? prior.count + 1 : 1;
-    const priorWasAlerted = prior.alerted || prior.count >= 3;
     nextEntries[id] = {
       id,
       operation,
@@ -70,9 +94,10 @@ export function nextCanaryState(previous, observations, now = new Date().toISOSt
       firstFailureAtUtc: sameSequence ? prior.firstFailureAtUtc ?? updatedAtUtc : updatedAtUtc,
       lastFailureAtUtc: updatedAtUtc,
       recoveryAtUtc: sameSequence ? prior.recoveryAtUtc : null,
-      alerted: (sameSequence && priorWasAlerted) || count >= 3,
+      alerted: priorWasAlerted || count >= 3,
       recoveryPending: false,
       recoveredFailureClass: null,
+      recoveryResolution: null,
     };
   }
 
@@ -98,11 +123,15 @@ export function issuesToUpdate(state) {
         action: "close",
         failureClass: entry.recoveredFailureClass ?? entry.failureClass,
         count: 0,
+        resolution: entry.recoveryResolution ?? "success",
+        ...(entry.recoveryResolution === "environmental"
+          ? { currentFailureClass: entry.failureClass }
+          : {}),
       });
     }
     if (entry.count === 3) {
       actions.push({ id, action: "open", failureClass: entry.failureClass, count: entry.count });
-    } else if (entry.count > 3) {
+    } else if (entry.count > 3 || (entry.alerted && entry.count > 0)) {
       actions.push({ id, action: "update", failureClass: entry.failureClass, count: entry.count });
     }
   }
@@ -290,6 +319,7 @@ function normalizePreviousEntry(entry, id) {
       alerted: false,
       recoveryPending: false,
       recoveredFailureClass: null,
+      recoveryResolution: null,
     };
   }
   const count = Number.isInteger(entry.count) && entry.count >= 0 ? entry.count : 0;
@@ -304,6 +334,7 @@ function normalizePreviousEntry(entry, id) {
     alerted: entry.alerted === true || count >= 3,
     recoveryPending: entry.recoveryPending === true,
     recoveredFailureClass: entry.recoveredFailureClass ?? null,
+    recoveryResolution: entry.recoveryResolution ?? null,
   };
 }
 

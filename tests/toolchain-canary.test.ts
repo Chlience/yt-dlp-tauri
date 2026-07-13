@@ -70,6 +70,98 @@ test("a different failure class starts a new consecutive sequence", () => {
   assert.equal(state.entries["youtube-public"].firstFailureAtUtc, "2026-07-05T05:53:00Z");
 });
 
+test("environmental Canary outcomes do not accumulate actionable failures", () => {
+  let state = emptyCanaryState();
+  for (let count = 0; count < 4; count += 1) {
+    state = nextCanaryState(
+      state,
+      [
+        {
+          id: "youtube-public",
+          operation: "metadata",
+          ok: false,
+          failureClass: "authentication",
+        },
+      ],
+      `2026-07-0${count + 1}T05:53:00Z`,
+    );
+  }
+
+  assert.equal(state.entries["youtube-public"].count, 0);
+  assert.equal(state.entries["youtube-public"].alerted, false);
+  assert.deepEqual(issuesToUpdate(state), []);
+});
+
+test("an environmental outcome closes a prior actionable alert", () => {
+  const state = nextCanaryState(
+    {
+      entries: {
+        "youtube-public": {
+          id: "youtube-public",
+          operation: "metadata",
+          count: 5,
+          failureClass: "metadata",
+          alerted: true,
+        },
+      },
+    },
+    [
+      {
+        id: "youtube-public",
+        operation: "metadata",
+        ok: false,
+        failureClass: "authentication",
+      },
+    ],
+    "2026-07-06T05:53:00Z",
+  );
+
+  assert.deepEqual(issuesToUpdate(state), [
+    {
+      id: "youtube-public",
+      action: "close",
+      failureClass: "metadata",
+      count: 0,
+      resolution: "environmental",
+      currentFailureClass: "authentication",
+    },
+  ]);
+});
+
+test("a new actionable failure class updates an existing site alert", () => {
+  const state = nextCanaryState(
+    {
+      entries: {
+        "youtube-public": {
+          id: "youtube-public",
+          operation: "metadata",
+          count: 5,
+          failureClass: "metadata",
+          alerted: true,
+        },
+      },
+    },
+    [
+      {
+        id: "youtube-public",
+        operation: "metadata",
+        ok: false,
+        failureClass: "target-unavailable",
+      },
+    ],
+    "2026-07-06T05:53:00Z",
+  );
+
+  assert.deepEqual(issuesToUpdate(state), [
+    {
+      id: "youtube-public",
+      action: "update",
+      failureClass: "target-unavailable",
+      count: 1,
+    },
+  ]);
+});
+
 test("only the first recovery emits a close action", () => {
   let state = emptyCanaryState();
   for (let count = 0; count < 3; count += 1) {
