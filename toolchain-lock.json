@@ -23,13 +23,6 @@
           "kind": "zip",
           "size": 42721120,
           "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
-            "size": 42721120,
-            "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf"
-          },
           "members": [
             {
               "tool": "deno",
@@ -40,7 +33,14 @@
               "archivePathSuffix": "deno.exe",
               "archivePath": "deno.exe"
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
+            "size": 42721120,
+            "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf"
+          }
         }
       ]
     },
@@ -63,13 +63,6 @@
           "kind": "zip",
           "size": 167300768,
           "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
-            "size": 167300768,
-            "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7"
-          },
           "members": [
             {
               "tool": "ffmpeg",
@@ -89,7 +82,14 @@
               "archivePathSuffix": "bin/ffprobe.exe",
               "archivePath": "ffmpeg-N-125365-g9a01c1cb6a-win64-gpl/bin/ffprobe.exe"
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
+            "size": 167300768,
+            "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7"
+          }
         }
       ],
       "redistribution": {
@@ -127,13 +127,6 @@
           "kind": "file",
           "size": 18226085,
           "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
-            "size": 18226085,
-            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
-          },
           "members": [
             {
               "tool": "yt-dlp",
@@ -142,7 +135,14 @@
               "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
               "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
+            "size": 18226085,
+            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
+          }
         }
       ]
     }
