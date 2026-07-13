@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import {
   generateManifest,
@@ -29,6 +30,17 @@ const DEFAULTS = {
 
 function jsonText(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function preserveEquivalentJson(previous, nextValue) {
+  if (previous) {
+    try {
+      if (isDeepStrictEqual(JSON.parse(previous), nextValue)) return previous;
+    } catch {
+      // Replace invalid generated JSON with the resolved value below.
+    }
+  }
+  return jsonText(nextValue);
 }
 
 async function readOptional(path) {
@@ -82,7 +94,7 @@ function sourceChanges(currentLock, nextLock) {
   const before = new Map((currentLock?.sources ?? []).map((source) => [source.id, source]));
   const after = new Map((nextLock.sources ?? []).map((source) => [source.id, source]));
   return [...new Set([...before.keys(), ...after.keys()])]
-    .filter((id) => JSON.stringify(before.get(id)) !== JSON.stringify(after.get(id)))
+    .filter((id) => !isDeepStrictEqual(before.get(id), after.get(id)))
     .sort(compareStrings);
 }
 
@@ -186,8 +198,16 @@ export async function runUpdateToolchain({
     existingChangelog,
   );
   const outputs = [
-    { path: lockPath, content: jsonText(nextLock), previous: currentLockText ?? "" },
-    { path: manifestPath, content: jsonText(nextManifest), previous: existingManifest },
+    {
+      path: lockPath,
+      content: preserveEquivalentJson(currentLockText, nextLock),
+      previous: currentLockText ?? "",
+    },
+    {
+      path: manifestPath,
+      content: preserveEquivalentJson(existingManifest, nextManifest),
+      previous: existingManifest,
+    },
     { path: changelogPath, content: nextChangelog, previous: existingChangelog },
   ];
   const changed = outputs.some((output) => output.content !== output.previous);

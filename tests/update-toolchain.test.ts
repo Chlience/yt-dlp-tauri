@@ -94,6 +94,35 @@ test("dry-run generates a result without writing output files", async (t) => {
   assert.equal(await readFile(paths.manifestPath, "utf8"), manifestBefore);
 });
 
+test("property order changes do not create a toolchain update", async (t) => {
+  const paths = await updateWorkspace(t);
+  await runUpdateToolchain({
+    ...paths,
+    fixturePath,
+    now: new Date("2026-07-11T00:00:00Z"),
+  });
+  const lock = JSON.parse(await readFile(paths.lockPath, "utf8"));
+  for (const source of lock.sources) {
+    source.assets = source.assets.map((asset) => {
+      if (!asset.archive) return asset;
+      const { archive, members, ...fields } = asset;
+      return { ...fields, archive, members };
+    });
+  }
+  const reorderedLock = `${JSON.stringify(lock, null, 2)}\n`;
+  await writeFile(paths.lockPath, reorderedLock);
+
+  const result = await runUpdateToolchain({
+    ...paths,
+    fixturePath,
+    now: new Date("2026-07-11T01:00:00Z"),
+  });
+
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.updatedSources, []);
+  assert.equal(await readFile(paths.lockPath, "utf8"), reorderedLock);
+});
+
 test("focused update changes one source and preserves the remaining lock", async (t) => {
   const paths = await updateWorkspace(t);
   await runUpdateToolchain({
