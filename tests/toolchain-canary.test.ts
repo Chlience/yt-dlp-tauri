@@ -112,7 +112,7 @@ test("Canary config allows only reviewed public HTTPS URLs", () => {
         {
           id: "youtube-public",
           operation: "metadata",
-          url: "https://www.youtube.com/watch?v=BaW_jenozKc",
+          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
         },
       ],
     }),
@@ -138,7 +138,7 @@ test("Canary command pins candidate Deno and FFmpeg without cookies", () => {
     {
       id: "youtube-public",
       operation: "metadata",
-      url: "https://www.youtube.com/watch?v=BaW_jenozKc",
+      url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
     },
     {
       ytDlp: "/tools/yt-dlp",
@@ -161,7 +161,7 @@ test("Canary observations classify 412 and redact query credentials", async () =
         {
           id: "youtube-public",
           operation: "metadata",
-          url: "https://www.youtube.com/watch?v=BaW_jenozKc",
+          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
         },
       ],
     },
@@ -179,4 +179,29 @@ test("Canary observations classify 412 and redact query credentials", async () =
 
   assert.equal(observations[0].failureClass, "precondition");
   assert.doesNotMatch(observations[0].summary, /token|secret/u);
+});
+
+test("Canary observations distinguish an unavailable target from extractor failures", async () => {
+  const observations = await runCanaryChecks(
+    {
+      schemaVersion: 1,
+      sites: [
+        {
+          id: "youtube-public",
+          operation: "metadata",
+          url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        },
+      ],
+    },
+    {
+      denoBinary: "/tools/deno",
+      ffmpegDirectory: "/tools/ffmpeg/bin",
+      tools: [{ name: "yt-dlp", full_path: "/tools/yt-dlp" }],
+    },
+    async () => {
+      throw new Error("ERROR: [youtube] example: Video unavailable");
+    },
+  );
+
+  assert.equal(observations[0].failureClass, "target-unavailable");
 });

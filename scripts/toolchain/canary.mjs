@@ -227,6 +227,13 @@ export function classifyCanaryFailure(summary, operation) {
     return "authentication";
   }
   if (/\b412\b|precondition/u.test(normalized)) return "precondition";
+  if (
+    /\bvideo (?:is )?unavailable\b|\bprivate video\b|\bvideo (?:has been|was) removed\b|\bvideo is no longer available\b/u.test(
+      normalized,
+    )
+  ) {
+    return "target-unavailable";
+  }
   if (/timed out|timeout|network|dns|connection|temporar/u.test(normalized)) return "network";
   return operation === "simulate" ? "simulate" : "metadata";
 }
