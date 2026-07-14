@@ -252,9 +252,7 @@ fn probe_candidate(name: &str, path: Option<&Path>) -> ToolStatus {
             availability: "missing".to_string(),
             version: None,
             expected_version: None,
-            error: Some(format!(
-                "Local {name} was not found in PATH and has no configured path"
-            )),
+            error: Some("Not Found".to_string()),
         },
     }
 }
@@ -421,5 +419,20 @@ mod tests {
                 .expect_err("incomplete paths should fail"),
             "Local toolchain is incomplete: missing yt-dlp, ffmpeg, ffprobe, deno"
         );
+    }
+
+    #[test]
+    fn missing_local_tools_use_a_concise_status() {
+        let statuses = probe_local_toolchain(&LocalToolchainResolution {
+            yt_dlp: None,
+            ffmpeg: None,
+            ffprobe: None,
+            deno: None,
+        });
+
+        assert_eq!(statuses.len(), 4);
+        assert!(statuses.iter().all(|status| {
+            status.availability == "missing" && status.error.as_deref() == Some("Not Found")
+        }));
     }
 }
