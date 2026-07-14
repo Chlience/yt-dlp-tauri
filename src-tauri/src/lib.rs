@@ -18,12 +18,13 @@ pub mod toolchain;
 
 use toolchain::{
     activate_revision, active_tool_paths, build_tool_download_client, manifest_target,
-    parse_channel_record, parse_manifest, probe_target, promote_staged_toolchain,
-    read_active_state, require_tools, revision_root, select_revision_manifest_asset,
-    stage_target_revision, tool_names_for_target, tool_paths_for_root, tool_target_from,
-    verify_channel_manifest, ActiveToolchainState, GitHubRelease, ManifestTarget, ProgressReporter,
-    StageTargetRevisionRequest, ToolInstallProgress, ToolPaths, ToolStatus, ToolsManifest,
-    REVISION_MANIFEST_FILE, TOOLS_DIRECTORY,
+    parse_channel_record, parse_local_toolchain_config, parse_manifest, probe_local_toolchain,
+    probe_target, promote_staged_toolchain, read_active_state, require_tools,
+    resolve_local_toolchain, revision_root, select_revision_manifest_asset, stage_target_revision,
+    tool_names_for_target, tool_paths_for_root, tool_target_from, verify_channel_manifest,
+    ActiveToolchainState, GitHubRelease, LocalToolchainConfig, ManifestTarget, ProgressReporter,
+    StageTargetRevisionRequest, ToolInstallProgress, ToolPaths, ToolStatus, ToolchainSource,
+    ToolsManifest, REVISION_MANIFEST_FILE, TOOLS_DIRECTORY,
 };
 
 const TOOLS_MANIFEST_FILE: &str = "tools-manifest.json";
@@ -38,6 +39,8 @@ const GITHUB_PROXY_URL_PREFIX: &str = "https://gh-proxy.com/";
 const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
 const COOKIE_HEADER_EXPIRY: &str = "2147483647";
+const TOOLCHAIN_SOURCE_FILE: &str = "toolchain-source.txt";
+const LOCAL_TOOLCHAIN_CONFIG_FILE: &str = "local-toolchain.json";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -46,7 +49,18 @@ struct AppState {
     download_directory: String,
     tools_root: String,
     toolchain_revision: Option<String>,
+    toolchain_source: ToolchainSource,
+    local_toolchain: LocalToolchainConfig,
+    local_toolchain_paths: LocalToolchainPaths,
     cookies_file: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalToolchainPaths {
+    yt_dlp_path: Option<PathBuf>,
+    ffmpeg_directory: Option<PathBuf>,
+    deno_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Serialize)]
@@ -75,6 +89,14 @@ struct DownloadRequest {
     url: String,
     format_selector: String,
     label: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalToolchainInput {
+    yt_dlp_path: Option<String>,
+    ffmpeg_directory: Option<String>,
+    deno_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,9 +145,9 @@ impl Drop for PreparedCookiesFile {
 #[tauri::command]
 async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let tools = locate_tools(&app)?;
         ensure_writable_directories()?;
-        build_app_state(tools.root.display().to_string())
+        let source = read_toolchain_source()?;
+        build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
     .map_err(join_error)?
@@ -221,11 +243,65 @@ async fn open_download_directory() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = ToolchainSource::parse(&source)?;
+        ensure_writable_directories()?;
+        let tools_root = tools_root_for_source(&app, source)?;
+        write_toolchain_source(source)?;
+        build_app_state(tools_root)
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn set_local_toolchain(
+    app: AppHandle,
+    config: LocalToolchainInput,
+) -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = LocalToolchainConfig::from_paths(
+            optional_input_path(config.yt_dlp_path),
+            optional_input_path(config.ffmpeg_directory),
+            optional_input_path(config.deno_path),
+        )?;
+        ensure_writable_directories()?;
+        write_local_toolchain_config(&config)?;
+        let source = read_toolchain_source()?;
+        build_app_state(tools_root_for_source(&app, source)?)
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn auto_detect_local_toolchain(app: AppHandle) -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ensure_writable_directories()?;
+        write_local_toolchain_config(&LocalToolchainConfig::default())?;
+        let source = read_toolchain_source()?;
+        build_app_state(tools_root_for_source(&app, source)?)
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
 async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let target_name = current_tool_target()?;
-        let target = read_manifest_target(&app, &target_name)?;
-        probe_manifest_tools(&app, &target)
+        match read_toolchain_source()? {
+            ToolchainSource::Managed => {
+                let target = read_manifest_target(&app, &target_name)?;
+                probe_manifest_tools(&app, &target)
+            }
+            ToolchainSource::Local => {
+                let config = read_local_toolchain_config()?;
+                let resolution = resolve_local_toolchain(&config, &target_name)?;
+                Ok(probe_local_toolchain(&resolution))
+            }
+        }
     })
     .await
     .map_err(join_error)?
@@ -237,6 +313,7 @@ async fn check_tools_with_manifest(
     manifest_json: String,
 ) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let target = manifest_target_from_json(&manifest_json, &target_name)?;
         probe_manifest_tools(&app, &target)
@@ -262,6 +339,7 @@ async fn install_tools(
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = read_current_manifest_json(&app)?;
         install_and_activate_manifest(
@@ -283,6 +361,7 @@ async fn install_tools_from_manifest(
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         install_and_activate_manifest(
             &app,
@@ -303,6 +382,7 @@ async fn reinstall_tools(
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = match manifest_json {
             Some(json) => json,
@@ -538,6 +618,35 @@ async fn cancel_download(
 }
 
 fn locate_tools(app: &AppHandle) -> Result<ToolPaths, String> {
+    match read_toolchain_source()? {
+        ToolchainSource::Managed => locate_managed_tools(app),
+        ToolchainSource::Local => {
+            let target = current_tool_target()?;
+            let config = read_local_toolchain_config()?;
+            resolve_local_toolchain(&config, &target)?.complete_paths()
+        }
+    }
+}
+
+fn tools_root_for_source(app: &AppHandle, source: ToolchainSource) -> Result<String, String> {
+    match source {
+        ToolchainSource::Managed => {
+            locate_managed_tools(app).map(|tools| tools.root.display().to_string())
+        }
+        ToolchainSource::Local => Ok(String::new()),
+    }
+}
+
+fn require_managed_toolchain_source() -> Result<(), String> {
+    match read_toolchain_source()? {
+        ToolchainSource::Managed => Ok(()),
+        ToolchainSource::Local => Err(
+            "Managed toolchain commands are unavailable while local tools are active".to_string(),
+        ),
+    }
+}
+
+fn locate_managed_tools(app: &AppHandle) -> Result<ToolPaths, String> {
     let target = current_tool_target()?;
     if let Some(paths) = active_tool_paths(&app_data_root()?, &target)? {
         return Ok(paths);
@@ -983,7 +1092,7 @@ fn probe_manifest_tools(
     app: &AppHandle,
     target: &ManifestTarget,
 ) -> Result<Vec<ToolStatus>, String> {
-    let tools = locate_tools(app)?;
+    let tools = locate_managed_tools(app)?;
     probe_target(&tools, target)
 }
 
@@ -1197,13 +1306,31 @@ fn was_cancel_requested(state: &DownloadProcessState) -> bool {
 
 fn build_app_state(tools_root: String) -> Result<AppState, String> {
     let target = current_tool_target()?;
+    let toolchain_source = read_toolchain_source()?;
+    let local_toolchain = read_local_toolchain_config()?;
+    let local_resolution = resolve_local_toolchain(&local_toolchain, &target)?;
+    let ffmpeg_directory = local_resolution.ffmpeg_directory().map(Path::to_path_buf);
+    let local_toolchain_paths = LocalToolchainPaths {
+        yt_dlp_path: local_resolution.yt_dlp,
+        ffmpeg_directory,
+        deno_path: local_resolution.deno,
+    };
     Ok(AppState {
         download_directory: download_directory()?.display().to_string(),
         tools_root,
         toolchain_revision: read_active_state(&app_data_root()?, &target)?
             .map(|state| state.revision),
+        toolchain_source,
+        local_toolchain,
+        local_toolchain_paths,
         cookies_file: cookies_file()?.map(|path| path.display().to_string()),
     })
+}
+
+fn optional_input_path(value: Option<String>) -> Option<PathBuf> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
 }
 
 fn kill_process_tree(pid: u32) -> Result<(), String> {
@@ -1519,6 +1646,68 @@ fn app_data_root() -> Result<PathBuf, String> {
 
 fn state_directory() -> Result<PathBuf, String> {
     Ok(app_data_root()?.join("state"))
+}
+
+fn read_toolchain_source() -> Result<ToolchainSource, String> {
+    let path = state_directory()?.join(TOOLCHAIN_SOURCE_FILE);
+    if !path.exists() {
+        return parse_toolchain_source_state(None);
+    }
+    let value = fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "Failed to read toolchain source at {}: {error}",
+            path.display()
+        )
+    })?;
+    parse_toolchain_source_state(Some(&value))
+}
+
+fn parse_toolchain_source_state(value: Option<&str>) -> Result<ToolchainSource, String> {
+    match value {
+        None => Ok(ToolchainSource::Managed),
+        Some(value) => ToolchainSource::parse(value),
+    }
+}
+
+fn write_toolchain_source(source: ToolchainSource) -> Result<(), String> {
+    let directory = state_directory()?;
+    fs::create_dir_all(&directory).map_err(to_string)?;
+    let path = directory.join(TOOLCHAIN_SOURCE_FILE);
+    fs::write(&path, format!("{}\n", source.as_str())).map_err(|error| {
+        format!(
+            "Failed to save toolchain source at {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn read_local_toolchain_config() -> Result<LocalToolchainConfig, String> {
+    let path = state_directory()?.join(LOCAL_TOOLCHAIN_CONFIG_FILE);
+    if !path.exists() {
+        return Ok(LocalToolchainConfig::default());
+    }
+    let json = fs::read_to_string(&path).map_err(|error| {
+        format!(
+            "Failed to read local toolchain configuration at {}: {error}",
+            path.display()
+        )
+    })?;
+    parse_local_toolchain_config(&json)
+}
+
+fn write_local_toolchain_config(config: &LocalToolchainConfig) -> Result<(), String> {
+    let directory = state_directory()?;
+    fs::create_dir_all(&directory).map_err(to_string)?;
+    let path = directory.join(LOCAL_TOOLCHAIN_CONFIG_FILE);
+    let mut json = serde_json::to_vec_pretty(config)
+        .map_err(|error| format!("Failed to serialize local toolchain configuration: {error}"))?;
+    json.push(b'\n');
+    fs::write(&path, json).map_err(|error| {
+        format!(
+            "Failed to save local toolchain configuration at {}: {error}",
+            path.display()
+        )
+    })
 }
 
 fn log_directory() -> Result<PathBuf, String> {
@@ -1952,6 +2141,24 @@ mod tests {
     }
 
     #[test]
+    fn toolchain_source_state_defaults_to_managed() {
+        assert_eq!(
+            parse_toolchain_source_state(None).expect("missing state should use the default"),
+            ToolchainSource::Managed
+        );
+        assert_eq!(
+            parse_toolchain_source_state(Some("local\n"))
+                .expect("stored local source should parse"),
+            ToolchainSource::Local
+        );
+    }
+
+    #[test]
+    fn toolchain_source_state_rejects_unknown_values() {
+        assert!(parse_toolchain_source_state(Some("automatic")).is_err());
+    }
+
+    #[test]
     fn parse_metadata_upgrades_http_thumbnail_candidates() {
         let metadata = parse_metadata_json(
             r#"
@@ -1993,6 +2200,9 @@ pub fn run() {
             set_cookies_file,
             clear_cookies_file,
             open_download_directory,
+            set_toolchain_source,
+            set_local_toolchain,
+            auto_detect_local_toolchain,
             check_tools,
             check_tools_with_manifest,
             fetch_latest_tool_manifest,

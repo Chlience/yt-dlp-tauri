@@ -38,6 +38,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Download with live progress, speed, ETA, cancellation, and a saved output folder.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
 - Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
+- Switch between the app-managed toolchain and trusted local tools discovered from `PATH` or selected by absolute path.
 - Resolve the stable toolchain from project-controlled immutable GitHub Release assets.
 - Stage and verify every tool before atomic activation, preserving the active revision when an update fails.
 - Switch the UI between English and Chinese.
@@ -52,7 +53,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 | Backend | Rust |
 | Frontend | Vanilla TypeScript, Vite |
 | UI | Fixed-size product-style desktop interface |
-| Toolchain | App-managed Windows x64 `yt-dlp`, `ffmpeg`, `ffprobe`, `deno` |
+| Toolchain | App-managed or user-selected Windows x64 `yt-dlp`, `ffmpeg`, `ffprobe`, `deno` |
 | Installer | Windows x64 NSIS |
 
 ## Quick Start
@@ -110,11 +111,18 @@ src-tauri\target\release\bundle\nsis\
 | `scripts/download-tools.ps1` | Optional development script that restores the pinned `win-x64` toolchain into the checkout. |
 | Settings: output folder | User-facing download directory selection, save, reset, and open actions. |
 | Settings: GitHub site | `Direct` or `gh-proxy` mode for update checks and release links. Project home always opens GitHub directly. |
+| Settings: tool source | Switch between the verified app-managed revision and trusted local executables. |
 
 Current release scope:
 
 - Supported tool target: `win-x64`.
 - Tool binaries are not committed to the repository.
+
+## Local Tool Mode
+
+Settings can switch the complete toolchain between `Managed` and `Local`. Local mode searches the current process `PATH` for `yt-dlp.exe`, `deno.exe`, and one directory containing both `ffmpeg.exe` and `ffprobe.exe`. The path controls can select an absolute yt-dlp executable, FFmpeg directory, or Deno executable when a tool is outside `PATH`. `Use PATH` clears those overrides and resolves all tools from `PATH` again.
+
+Local tools are checked by running their version commands and the same deterministic media compatibility fixture used for managed revisions. The app does not pin hashes, install updates, or replace local executables. Local programs run with the user's permissions; the selected yt-dlp executable receives video URLs and the selected Cookie file, so only trusted binaries should be configured.
 
 ## Toolchain Maintenance
 
@@ -143,6 +151,13 @@ App state and logs are stored under:
 ```text
 %LOCALAPPDATA%\yt-dlp-tauri\state\
 %LOCALAPPDATA%\yt-dlp-tauri\logs\app.log
+```
+
+The selected tool source and optional absolute-path overrides are stored in:
+
+```text
+%LOCALAPPDATA%\yt-dlp-tauri\state\toolchain-source.txt
+%LOCALAPPDATA%\yt-dlp-tauri\state\local-toolchain.json
 ```
 
 Installed app toolchain revisions are written under:

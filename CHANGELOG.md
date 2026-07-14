@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 中文
+
+- Settings 支持在应用管理工具链与本地工具链之间切换；本地模式可从 `PATH` 自动检测工具，也可分别选择 yt-dlp、FFmpeg 目录和 Deno 的绝对路径。
+- 本地模式要求 FFmpeg 与 FFprobe 位于同一目录，并通过版本探测和确定性媒体测试验证整套工具的运行兼容性；本地文件的版本、哈希和更新由用户管理。
+
+### English
+
+- Added a Settings switch between the app-managed and local toolchains, with `PATH` auto-detection and absolute-path selection for yt-dlp, the FFmpeg directory, and Deno.
+- Required FFmpeg and FFprobe to share a directory and verified the complete local toolchain through version probes and a deterministic media test, while leaving local versions, hashes, and updates under user control.
+
 ## 0.1.12 - 2026-07-12
 
 ### 中文

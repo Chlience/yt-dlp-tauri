@@ -19,8 +19,8 @@ function tool(availability: ToolStatus["availability"], version = "1.0.0", expec
   };
 }
 
-test("summarizeTools leaves healthy toolchains without a primary action", () => {
-  assert.deepEqual(summarizeTools([tool("available")], "local"), {
+test("summarizeTools leaves healthy managed toolchains without a primary action", () => {
+  assert.deepEqual(summarizeTools([tool("available")], "managed"), {
     ready: true,
     action: null,
     settingsKey: "settings.toolsAvailable",
@@ -30,13 +30,32 @@ test("summarizeTools leaves healthy toolchains without a primary action", () => 
   });
 });
 
-test("summarizeTools asks for reinstall when local verification finds damaged tools", () => {
-  assert.deepEqual(summarizeTools([tool("outdated", "1.0.0", "1.0.0")], "local"), {
+test("summarizeTools asks for reinstall when managed verification finds damaged tools", () => {
+  assert.deepEqual(summarizeTools([tool("outdated", "1.0.0", "1.0.0")], "managed"), {
     ready: false,
     action: "reinstall",
     settingsKey: "settings.toolsDamaged",
     noticeKey: "notice.toolsDamaged",
     eventKey: "event.toolsDamaged",
+    tone: "warning",
+  });
+});
+
+test("summarizeTools never offers managed actions for local tools", () => {
+  assert.deepEqual(summarizeTools([tool("missing")], "local"), {
+    ready: false,
+    action: null,
+    settingsKey: "settings.localToolsMissing",
+    noticeKey: "notice.localToolsMissing",
+    eventKey: "event.localToolsMissing",
+    tone: "warning",
+  });
+  assert.deepEqual(summarizeTools([tool("cannot_execute")], "local"), {
+    ready: false,
+    action: null,
+    settingsKey: "settings.localToolsDamaged",
+    noticeKey: "notice.localToolsDamaged",
+    eventKey: "event.localToolsDamaged",
     tone: "warning",
   });
 });

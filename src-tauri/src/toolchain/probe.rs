@@ -13,6 +13,7 @@ use std::{
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMBINATION_PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn probe_target(paths: &ToolPaths, target: &ManifestTarget) -> Result<Vec<ToolStatus>, String> {
@@ -26,7 +27,7 @@ pub fn probe_target(paths: &ToolPaths, target: &ManifestTarget) -> Result<Vec<To
 pub fn require_tools(tools: &ToolPaths) -> Result<(), String> {
     for path in [&tools.yt_dlp, &tools.ffmpeg, &tools.ffprobe, &tools.deno] {
         if !path.exists() {
-            return Err(format!("Missing bundled tool: {}", path.display()));
+            return Err(format!("Missing tool: {}", path.display()));
         }
     }
     Ok(())
@@ -126,6 +127,14 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
 }
 
 fn run_bounded_probe(command: &mut Command, label: &str) -> Result<Output, String> {
+    run_bounded_probe_with_timeout(command, label, COMBINATION_PROBE_TIMEOUT)
+}
+
+fn run_bounded_probe_with_timeout(
+    command: &mut Command,
+    label: &str,
+    timeout: Duration,
+) -> Result<Output, String> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command
         .spawn()
@@ -150,12 +159,12 @@ fn run_bounded_probe(command: &mut Command, label: &str) -> Result<Output, Strin
                     &output.stdout,
                 ));
             }
-            None if started.elapsed() >= COMBINATION_PROBE_TIMEOUT => {
+            None if started.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!(
                     "{label} timed out after {} seconds",
-                    COMBINATION_PROBE_TIMEOUT.as_secs()
+                    timeout.as_secs()
                 ));
             }
             None => thread::sleep(Duration::from_millis(50)),
@@ -198,6 +207,15 @@ fn tool_version_args(name: &str) -> &'static [&'static str] {
     }
 }
 
+pub(crate) fn probe_executable(name: &str, full_path: &Path) -> ToolStatus {
+    probe_tool(
+        name,
+        &full_path.display().to_string(),
+        full_path,
+        tool_version_args(name),
+    )
+}
+
 fn availability_for_manifest_probe(availability: &str, sha_matches: bool) -> String {
     if availability == "available" && !sha_matches {
         "outdated".to_string()
@@ -220,13 +238,15 @@ fn probe_tool(
             availability: "missing".to_string(),
             version: None,
             expected_version: None,
-            error: Some("Bundled tool file is missing".to_string()),
+            error: Some("Tool file is missing".to_string()),
         };
     }
 
     let mut command = background_command(full_path);
-    match command.args(version_args).output() {
-        Ok(output) if output.status.success() => ToolStatus {
+    command.args(version_args);
+    let label = format!("{name} version probe at {}", full_path.display());
+    match run_bounded_probe_with_timeout(&mut command, &label, VERSION_PROBE_TIMEOUT) {
+        Ok(output) => ToolStatus {
             name: name.to_string(),
             relative_path: relative_path.to_string(),
             full_path: full_path.display().to_string(),
@@ -235,23 +255,6 @@ fn probe_tool(
             expected_version: None,
             error: None,
         },
-        Ok(output) => ToolStatus {
-            name: name.to_string(),
-            relative_path: relative_path.to_string(),
-            full_path: full_path.display().to_string(),
-            availability: "cannot_execute".to_string(),
-            version: None,
-            expected_version: None,
-            error: Some(process_failure_message(
-                &format!(
-                    "{name} at {} failed to report a version",
-                    full_path.display()
-                ),
-                output.status.code(),
-                &output.stderr,
-                &output.stdout,
-            )),
-        },
         Err(error) => ToolStatus {
             name: name.to_string(),
             relative_path: relative_path.to_string(),
@@ -259,10 +262,7 @@ fn probe_tool(
             availability: "cannot_execute".to_string(),
             version: None,
             expected_version: None,
-            error: Some(format!(
-                "Failed to run {name} at {}: {error}",
-                full_path.display()
-            )),
+            error: Some(error),
         },
     }
 }

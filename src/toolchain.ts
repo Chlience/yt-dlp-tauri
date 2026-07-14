@@ -9,7 +9,7 @@ export type ToolStatus = {
 };
 
 export type ToolAction = "install" | "update" | "reinstall";
-export type ToolSummaryMode = "local" | "remote";
+export type ToolSummaryMode = "managed" | "local" | "remote";
 
 export type RemoteToolManifest = {
   status: "available" | "no_release" | "no_manifest";
@@ -25,9 +25,26 @@ export type ToolSummary = {
     | "settings.toolsAvailable"
     | "settings.toolsMissing"
     | "settings.toolsDamaged"
+    | "settings.localToolsAvailable"
+    | "settings.localToolsMissing"
+    | "settings.localToolsDamaged"
     | "settings.toolUpdatesAvailable";
-  noticeKey: "notice.toolchainReady" | "notice.toolsMissing" | "notice.toolsDamaged" | "notice.toolsOutdated";
-  eventKey: "event.toolsAvailable" | "event.toolsMissing" | "event.toolsDamaged" | "event.toolUpdatesAvailable";
+  noticeKey:
+    | "notice.toolchainReady"
+    | "notice.toolsMissing"
+    | "notice.toolsDamaged"
+    | "notice.toolsOutdated"
+    | "notice.localToolchainReady"
+    | "notice.localToolsMissing"
+    | "notice.localToolsDamaged";
+  eventKey:
+    | "event.toolsAvailable"
+    | "event.toolsMissing"
+    | "event.toolsDamaged"
+    | "event.toolUpdatesAvailable"
+    | "event.localToolsAvailable"
+    | "event.localToolsMissing"
+    | "event.localToolsDamaged";
   tone: "success" | "warning";
 };
 
@@ -37,6 +54,16 @@ export function summarizeTools(tools: ToolStatus[], mode: ToolSummaryMode): Tool
   const ready = tools.length > 0 && tools.every((tool) => tool.availability === "available");
 
   if (ready) {
+    if (mode === "local") {
+      return {
+        ready: true,
+        action: null,
+        settingsKey: "settings.localToolsAvailable",
+        noticeKey: "notice.localToolchainReady",
+        eventKey: "event.localToolsAvailable",
+        tone: "success",
+      };
+    }
     return {
       ready: true,
       action: null,
@@ -45,6 +72,26 @@ export function summarizeTools(tools: ToolStatus[], mode: ToolSummaryMode): Tool
       eventKey: "event.toolsAvailable",
       tone: "success",
     };
+  }
+
+  if (mode === "local") {
+    return hasMissing
+      ? {
+          ready: false,
+          action: null,
+          settingsKey: "settings.localToolsMissing",
+          noticeKey: "notice.localToolsMissing",
+          eventKey: "event.localToolsMissing",
+          tone: "warning",
+        }
+      : {
+          ready: false,
+          action: null,
+          settingsKey: "settings.localToolsDamaged",
+          noticeKey: "notice.localToolsDamaged",
+          eventKey: "event.localToolsDamaged",
+          tone: "warning",
+        };
   }
 
   if (hasMissing) {

@@ -38,6 +38,7 @@
 - 下载时显示实时进度、速度、ETA，支持取消，并保存输出目录。
 - 为需要登录态的站点选择 Cookie 文件，支持 Netscape `cookies.txt` 和一行浏览器 Cookie 请求头。
 - 在 Settings 中安装、更新、重新安装和校验应用管理的完整工具链 revision。
+- 可在应用管理工具链与可信本地工具之间切换，本地工具支持从 `PATH` 检测或使用绝对路径选择。
 - 从项目托管的不可变 GitHub Release 资产解析 stable 工具链。
 - 完整 staging 并校验所有工具后再原子激活，更新失败时保留当前可用 revision。
 - 支持中英文界面切换。
@@ -52,7 +53,7 @@
 | 后端 | Rust |
 | 前端 | Vanilla TypeScript, Vite |
 | UI | 固定尺寸的产品型桌面界面 |
-| 工具链 | 应用管理的 Windows x64 `yt-dlp`、`ffmpeg`、`ffprobe`、`deno` |
+| 工具链 | 应用管理或用户选择的 Windows x64 `yt-dlp`、`ffmpeg`、`ffprobe`、`deno` |
 | 安装包 | Windows x64 NSIS |
 
 ## 快速开始
@@ -110,11 +111,18 @@ src-tauri\target\release\bundle\nsis\
 | `scripts/download-tools.ps1` | 可选开发脚本，把 pinned `win-x64` 工具链还原到 checkout 中。 |
 | Settings: output folder | 用户侧下载目录选择、保存、重置和打开入口。 |
 | Settings: GitHub site | 为更新检查和 release 链接选择 `Direct` 或 `gh-proxy`。项目主页始终直连 GitHub。 |
+| Settings: tool source | 在经过验证的应用管理 revision 与可信本地可执行文件之间切换。 |
 
 当前发布范围：
 
 - 支持的工具 target：`win-x64`。
 - 仓库不提交工具二进制。
+
+## 本地工具模式
+
+Settings 可将完整工具链切换为 `应用管理` 或 `本地工具`。本地模式会在当前进程的 `PATH` 中查找 `yt-dlp.exe`、`deno.exe`，并查找同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录。工具不在 `PATH` 中时，可以分别选择 yt-dlp 可执行文件、FFmpeg 目录和 Deno 可执行文件的绝对路径。`使用 PATH` 会清除这些覆盖路径，再次从 `PATH` 解析全部工具。
+
+应用会运行本地工具的版本命令，并执行与受管 revision 相同的确定性媒体兼容性测试。应用不会固定本地文件哈希、安装更新或替换本地程序。本地程序以当前用户权限运行；所选 yt-dlp 会接收视频 URL 和 Cookie 文件，因此应只配置可信的可执行文件。
 
 ## 工具链维护
 
@@ -143,6 +151,13 @@ GITHUB_TOKEN="$(gh auth token)" node scripts/update-toolchain.mjs --dry-run
 ```text
 %LOCALAPPDATA%\yt-dlp-tauri\state\
 %LOCALAPPDATA%\yt-dlp-tauri\logs\app.log
+```
+
+工具来源和可选绝对路径配置位于：
+
+```text
+%LOCALAPPDATA%\yt-dlp-tauri\state\toolchain-source.txt
+%LOCALAPPDATA%\yt-dlp-tauri\state\local-toolchain.json
 ```
 
 安装后的应用会把工具链 revision 写入：

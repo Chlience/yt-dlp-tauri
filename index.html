@@ -132,13 +132,48 @@
       <section class="settings-section" aria-labelledby="tools-heading">
         <div class="settings-section-header">
           <h3 id="tools-heading" data-i18n="settings.toolchain">Toolchain</h3>
-          <p data-i18n="settings.toolchainHint">Per-target tools are verified with SHA-256</p>
+          <p id="toolchain-hint" data-i18n="settings.toolchainHint">Per-target tools are verified with SHA-256</p>
         </div>
-        <p id="tool-root" class="path-text">Resolving tools path...</p>
-        <p class="toolchain-revision">
-          <span data-i18n="settings.activeRevision">Active revision</span>
-          <code id="toolchain-revision">None</code>
-        </p>
+        <div class="tool-source-row">
+          <span data-i18n="settings.toolSource">Tool source</span>
+          <div class="tool-source-toggle" role="group" data-i18n-aria-label="settings.toolSource" aria-label="Tool source">
+            <button id="tool-source-managed" class="segment" type="button" data-tool-source="managed" data-i18n="settings.managedTools">Managed</button>
+            <button id="tool-source-local" class="segment" type="button" data-tool-source="local" data-i18n="settings.localTools">Local</button>
+          </div>
+        </div>
+        <div id="managed-toolchain-details">
+          <p id="tool-root" class="path-text">Resolving tools path...</p>
+          <p class="toolchain-revision">
+            <span data-i18n="settings.activeRevision">Active revision</span>
+            <code id="toolchain-revision">None</code>
+          </p>
+        </div>
+        <div id="local-toolchain-paths" class="local-toolchain-paths" hidden>
+          <ul class="local-path-list">
+            <li>
+              <div class="local-path-copy">
+                <span class="local-path-label">yt-dlp</span>
+                <code id="local-yt-dlp-path">Not detected</code>
+              </div>
+              <button id="choose-local-yt-dlp" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseYtDlp" aria-label="Choose yt-dlp">Choose</button>
+            </li>
+            <li>
+              <div class="local-path-copy">
+                <span class="local-path-label">FFmpeg + FFprobe</span>
+                <code id="local-ffmpeg-path">Not detected</code>
+              </div>
+              <button id="choose-local-ffmpeg" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseFfmpegDirectory" aria-label="Choose FFmpeg directory">Choose</button>
+            </li>
+            <li>
+              <div class="local-path-copy">
+                <span class="local-path-label">Deno</span>
+                <code id="local-deno-path">Not detected</code>
+              </div>
+              <button id="choose-local-deno" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseDeno" aria-label="Choose Deno">Choose</button>
+            </li>
+          </ul>
+          <button id="auto-detect-local-tools" class="button secondary" type="button" data-i18n="action.usePath">Use PATH</button>
+        </div>
         <ul id="tool-list" class="tool-list"></ul>
         <p id="tool-install-status" class="tool-install-status">Install missing tools automatically</p>
         <div class="tool-actions">

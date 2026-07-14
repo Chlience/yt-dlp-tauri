@@ -727,7 +727,8 @@ progress::-webkit-progress-value {
   padding-bottom: 14px;
 }
 
-.github-access-row {
+.github-access-row,
+.tool-source-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -735,11 +736,13 @@ progress::-webkit-progress-value {
   min-height: 34px;
 }
 
-.github-access-row h3 {
+.github-access-row h3,
+.tool-source-row > span {
   min-width: 0;
 }
 
-.github-access-toggle {
+.github-access-toggle,
+.tool-source-toggle {
   display: inline-flex;
   min-height: 32px;
   padding: 3px;
@@ -748,9 +751,55 @@ progress::-webkit-progress-value {
   background: color-mix(in oklch, var(--surface), var(--page) 40%);
 }
 
-.github-access-toggle .segment {
+.github-access-toggle .segment,
+.tool-source-toggle .segment {
   min-width: 68px;
   font-size: 0.8rem;
+}
+
+.local-toolchain-paths {
+  display: grid;
+  gap: 9px;
+}
+
+.local-path-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.local-path-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 7px 8px 7px 10px;
+}
+
+.local-path-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.local-path-label {
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 680;
+}
+
+.local-path-copy code {
+  color: var(--muted);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .split-actions,
@@ -917,7 +966,8 @@ progress::-webkit-progress-value {
   }
 
   .settings-footer-main,
-  .github-access-row {
+  .github-access-row,
+  .tool-source-row {
     grid-template-columns: 1fr;
   }
 
@@ -925,7 +975,8 @@ progress::-webkit-progress-value {
     display: grid;
   }
 
-  .github-access-row {
+  .github-access-row,
+  .tool-source-row {
     display: grid;
   }
 
@@ -935,7 +986,8 @@ progress::-webkit-progress-value {
     width: 100%;
   }
 
-  .github-access-toggle {
+  .github-access-toggle,
+  .tool-source-toggle {
     width: 100%;
   }
 

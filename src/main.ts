@@ -39,8 +39,22 @@ type AppState = {
   download_directory: string;
   tools_root: string;
   toolchain_revision?: string | null;
+  toolchain_source: ToolchainSource;
+  local_toolchain: LocalToolchainConfig;
+  local_toolchain_paths: LocalToolchainPaths;
   cookies_file?: string | null;
 };
+
+type ToolchainSource = "managed" | "local";
+
+type LocalToolchainConfig = {
+  schemaVersion: number;
+  ytDlpPath?: string | null;
+  ffmpegDirectory?: string | null;
+  denoPath?: string | null;
+};
+
+type LocalToolchainPaths = Omit<LocalToolchainConfig, "schemaVersion">;
 
 type DownloadProgress = {
   percent?: number;
@@ -94,6 +108,11 @@ const translations = {
     "action.installTools": "Install tools",
     "action.updateTools": "Update tools",
     "action.reinstallTools": "Reinstall tools",
+    "action.choosePath": "Choose",
+    "action.chooseYtDlp": "Choose yt-dlp",
+    "action.chooseFfmpegDirectory": "Choose FFmpeg directory",
+    "action.chooseDeno": "Choose Deno",
+    "action.usePath": "Use PATH",
     "action.checkUpdates": "Check updates",
     "action.openRelease": "Open release",
     "action.releaseNotes": "Release notes",
@@ -113,6 +132,7 @@ const translations = {
     "preview.emptyStart": "Paste a video URL to inspect title, cover, duration, and qualities.",
     "preview.emptyChanged": "Paste a URL and parse it before downloading.",
     "preview.cookiesChanged": "Cookie file changed. Parse again before downloading.",
+    "preview.toolsChanged": "Tool source changed. Parse again before downloading.",
     "preview.readingMetadata": "Reading metadata from yt-dlp...",
     "preview.parseFailed": "Metadata parsing failed. Check the URL and tools.",
     "preview.noDescription": "No description returned by yt-dlp.",
@@ -133,6 +153,9 @@ const translations = {
     "notice.toolsMissing": "Some tools are missing.",
     "notice.toolsOutdated": "Toolchain update available.",
     "notice.toolsDamaged": "Toolchain needs reinstall.",
+    "notice.localToolchainReady": "Local toolchain ready.",
+    "notice.localToolsMissing": "Some local tools are missing.",
+    "notice.localToolsDamaged": "Local toolchain verification failed.",
     "notice.toolCheckFailed": "Tool check failed.",
     "notice.toolsInstalled": "Toolchain installed.",
     "notice.toolInstallNeedsAttention": "Tool install needs attention.",
@@ -162,6 +185,10 @@ const translations = {
     "settings.resolvingFolder": "Resolving download folder...",
     "settings.toolchain": "Toolchain",
     "settings.toolchainHint": "Per-target tools are verified with SHA-256.",
+    "settings.localToolchainHint": "Local executables are verified by behavior and remain user-managed.",
+    "settings.toolSource": "Tool source",
+    "settings.managedTools": "Managed",
+    "settings.localTools": "Local",
     "settings.activeRevision": "Active revision",
     "settings.noActiveRevision": "None",
     "settings.resolvingTools": "Resolving tools path...",
@@ -174,6 +201,15 @@ const translations = {
     "settings.toolsAvailable": "All required tools are available.",
     "settings.toolsMissing": "Missing tools can be installed automatically.",
     "settings.toolsDamaged": "Some tools are missing, damaged, or do not match the active manifest.",
+    "settings.localPathNotDetected": "Not detected",
+    "settings.detectingLocalTools": "Detecting local tools from PATH...",
+    "settings.usePathHint": "Clear selected paths and resolve all local tools from the current PATH.",
+    "settings.localToolsAvailable": "Local yt-dlp, FFmpeg, FFprobe and Deno passed verification.",
+    "settings.localToolsMissing": "Choose missing local paths or use the current PATH.",
+    "settings.localToolsDamaged": "One or more local tools failed version or compatibility checks.",
+    "settings.toolSourceFailed": "Could not change tool source: {message}",
+    "settings.localToolSaveFailed": "Could not save local tool paths: {message}",
+    "settings.localToolDetectFailed": "Could not detect local tools: {message}",
     "settings.toolUpdatesChecking": "Checking the latest released tool manifest...",
     "settings.toolUpdatesAvailable": "A released toolchain update is available.",
     "settings.toolUpdatesCurrent": "Tools match the latest released manifest.",
@@ -195,6 +231,11 @@ const translations = {
     "event.toolsAvailable": "yt-dlp, ffmpeg, ffprobe and deno are available.",
     "event.toolsMissing": "Tool check found missing tools.",
     "event.toolsDamaged": "Tool check found tools that need reinstall.",
+    "event.localToolsAvailable": "Local toolchain passed verification.",
+    "event.localToolsMissing": "Local toolchain has missing paths.",
+    "event.localToolsDamaged": "Local toolchain failed verification.",
+    "event.localToolsSelected": "Local tool source selected.",
+    "event.managedToolsSelected": "Managed tool source selected.",
     "event.toolUpdatesAvailable": "Released toolchain update found.",
     "event.toolUpdatesCurrent": "Tools match the latest released manifest.",
     "event.toolsInstalled": "Toolchain installed.",
@@ -234,6 +275,11 @@ const translations = {
     "action.installTools": "安装工具",
     "action.updateTools": "更新工具",
     "action.reinstallTools": "重新安装工具",
+    "action.choosePath": "选择",
+    "action.chooseYtDlp": "选择 yt-dlp",
+    "action.chooseFfmpegDirectory": "选择 FFmpeg 目录",
+    "action.chooseDeno": "选择 Deno",
+    "action.usePath": "使用 PATH",
     "action.checkUpdates": "检查更新",
     "action.openRelease": "打开发布页",
     "action.releaseNotes": "更新说明",
@@ -253,6 +299,7 @@ const translations = {
     "preview.emptyStart": "粘贴视频链接后解析，可查看标题、封面、时长和清晰度。",
     "preview.emptyChanged": "请先解析当前链接，再开始下载。",
     "preview.cookiesChanged": "Cookie 文件已变更，请重新解析后再下载。",
+    "preview.toolsChanged": "工具来源已更改，请重新解析后再下载。",
     "preview.readingMetadata": "正在通过 yt-dlp 读取信息...",
     "preview.parseFailed": "解析失败。请检查链接和工具链。",
     "preview.noDescription": "yt-dlp 未返回描述。",
@@ -273,6 +320,9 @@ const translations = {
     "notice.toolsMissing": "缺少部分工具。",
     "notice.toolsOutdated": "工具链有可用更新。",
     "notice.toolsDamaged": "工具链需要重新安装。",
+    "notice.localToolchainReady": "本地工具链已就绪。",
+    "notice.localToolsMissing": "缺少部分本地工具。",
+    "notice.localToolsDamaged": "本地工具链验证失败。",
     "notice.toolCheckFailed": "工具检查失败。",
     "notice.toolsInstalled": "工具链已安装。",
     "notice.toolInstallNeedsAttention": "工具安装需要处理。",
@@ -302,6 +352,10 @@ const translations = {
     "settings.resolvingFolder": "正在解析下载目录...",
     "settings.toolchain": "工具链",
     "settings.toolchainHint": "按目标平台安装，并用 SHA-256 校验。",
+    "settings.localToolchainHint": "本地程序按实际行为验证，版本与文件由用户管理。",
+    "settings.toolSource": "工具来源",
+    "settings.managedTools": "应用管理",
+    "settings.localTools": "本地工具",
     "settings.activeRevision": "当前 revision",
     "settings.noActiveRevision": "未激活",
     "settings.resolvingTools": "正在解析工具路径...",
@@ -314,6 +368,15 @@ const translations = {
     "settings.toolsAvailable": "所需工具均可用。",
     "settings.toolsMissing": "可自动安装缺失工具。",
     "settings.toolsDamaged": "部分工具缺失、损坏，或与当前清单不匹配。",
+    "settings.localPathNotDetected": "未检测到",
+    "settings.detectingLocalTools": "正在从 PATH 检测本地工具...",
+    "settings.usePathHint": "清除已选择的路径，并从当前 PATH 重新解析全部本地工具。",
+    "settings.localToolsAvailable": "本地 yt-dlp、FFmpeg、FFprobe 和 Deno 已通过验证。",
+    "settings.localToolsMissing": "请选择缺失路径，或使用当前 PATH。",
+    "settings.localToolsDamaged": "部分本地工具未通过版本或组合兼容性检查。",
+    "settings.toolSourceFailed": "无法切换工具来源：{message}",
+    "settings.localToolSaveFailed": "无法保存本地工具路径：{message}",
+    "settings.localToolDetectFailed": "无法检测本地工具：{message}",
     "settings.toolUpdatesChecking": "正在检查最新发布的工具清单...",
     "settings.toolUpdatesAvailable": "有已发布的工具链更新。",
     "settings.toolUpdatesCurrent": "工具链与最新发布清单一致。",
@@ -335,6 +398,11 @@ const translations = {
     "event.toolsAvailable": "yt-dlp、ffmpeg、ffprobe 和 deno 均可用。",
     "event.toolsMissing": "工具检查发现缺失项。",
     "event.toolsDamaged": "工具检查发现需要重新安装的项目。",
+    "event.localToolsAvailable": "本地工具链已通过验证。",
+    "event.localToolsMissing": "本地工具链存在缺失路径。",
+    "event.localToolsDamaged": "本地工具链验证失败。",
+    "event.localToolsSelected": "已选择本地工具来源。",
+    "event.managedToolsSelected": "已选择应用管理工具来源。",
     "event.toolUpdatesAvailable": "发现已发布的工具链更新。",
     "event.toolUpdatesCurrent": "工具链与最新发布清单一致。",
     "event.toolsInstalled": "工具链已安装。",
@@ -367,6 +435,18 @@ const state = {
   toolsReady: false,
   toolAction: null as ToolAction | null,
   toolchainRevision: null as string | null,
+  toolchainSource: "managed" as ToolchainSource,
+  localToolchain: {
+    schemaVersion: 1,
+    ytDlpPath: null,
+    ffmpegDirectory: null,
+    denoPath: null,
+  } as LocalToolchainConfig,
+  localToolchainPaths: {
+    ytDlpPath: null,
+    ffmpegDirectory: null,
+    denoPath: null,
+  } as LocalToolchainPaths,
   pendingToolManifestJson: null as string | null,
   updateChecking: false,
   latestReleaseUrl: "",
@@ -397,6 +477,17 @@ const elements = {
   languageEn: must<HTMLButtonElement>("#language-en"),
   languageZh: must<HTMLButtonElement>("#language-zh"),
   verifyTools: must<HTMLButtonElement>("#verify-tools"),
+  toolSourceManaged: must<HTMLButtonElement>("#tool-source-managed"),
+  toolSourceLocal: must<HTMLButtonElement>("#tool-source-local"),
+  managedToolchainDetails: must<HTMLElement>("#managed-toolchain-details"),
+  localToolchainPaths: must<HTMLElement>("#local-toolchain-paths"),
+  localYtDlpPath: must<HTMLElement>("#local-yt-dlp-path"),
+  localFfmpegPath: must<HTMLElement>("#local-ffmpeg-path"),
+  localDenoPath: must<HTMLElement>("#local-deno-path"),
+  chooseLocalYtDlp: must<HTMLButtonElement>("#choose-local-yt-dlp"),
+  chooseLocalFfmpeg: must<HTMLButtonElement>("#choose-local-ffmpeg"),
+  chooseLocalDeno: must<HTMLButtonElement>("#choose-local-deno"),
+  autoDetectLocalTools: must<HTMLButtonElement>("#auto-detect-local-tools"),
   checkToolUpdates: must<HTMLButtonElement>("#check-tool-updates"),
   installTools: must<HTMLButtonElement>("#install-tools"),
   reinstallTools: must<HTMLButtonElement>("#reinstall-tools"),
@@ -421,6 +512,7 @@ const elements = {
   folderText: must<HTMLElement>("#folder-text"),
   cookiesFile: must<HTMLElement>("#cookies-file"),
   toolRoot: must<HTMLElement>("#tool-root"),
+  toolchainHint: must<HTMLElement>("#toolchain-hint"),
   toolchainRevision: must<HTMLElement>("#toolchain-revision"),
   toolList: must<HTMLElement>("#tool-list"),
   toolInstallStatus: must<HTMLElement>("#tool-install-status"),
@@ -514,6 +606,8 @@ function applyTranslations() {
   }
   renderCookiesFile(state.cookiesFile);
   renderToolchainRevision();
+  renderToolchainSource();
+  renderLocalToolchainPaths();
   updateGithubAccessButtons();
   updateToolActionButton();
   if (state.releaseNotesOpen) {
@@ -615,6 +709,12 @@ function bindEvents() {
   elements.settingsBackdrop.addEventListener("click", () => setSettingsOpen(false));
   elements.languageEn.addEventListener("click", () => setLanguage("en"));
   elements.languageZh.addEventListener("click", () => setLanguage("zh"));
+  elements.toolSourceManaged.addEventListener("click", () => void setToolchainSource("managed"));
+  elements.toolSourceLocal.addEventListener("click", () => void setToolchainSource("local"));
+  elements.chooseLocalYtDlp.addEventListener("click", () => void chooseLocalTool("yt-dlp"));
+  elements.chooseLocalFfmpeg.addEventListener("click", () => void chooseLocalTool("ffmpeg"));
+  elements.chooseLocalDeno.addEventListener("click", () => void chooseLocalTool("deno"));
+  elements.autoDetectLocalTools.addEventListener("click", () => void autoDetectLocalTools());
   elements.verifyTools.addEventListener("click", () => void verifyTools());
   elements.checkToolUpdates.addEventListener("click", () => void checkToolUpdates());
   elements.installTools.addEventListener("click", () => void installTools());
@@ -683,12 +783,134 @@ async function bootstrap() {
 
 async function loadAppState() {
   const appState = await invoke<AppState>("get_app_state");
+  applyAppState(appState);
+}
+
+function applyAppState(appState: AppState) {
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
   elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
   state.toolchainRevision = appState.toolchain_revision ?? null;
+  state.toolchainSource = appState.toolchain_source;
+  state.localToolchain = appState.local_toolchain;
+  state.localToolchainPaths = appState.local_toolchain_paths;
   renderToolchainRevision();
+  renderToolchainSource();
+  renderLocalToolchainPaths();
   renderCookiesFile(appState.cookies_file ?? null);
+}
+
+async function setToolchainSource(source: ToolchainSource) {
+  if (state.busy || source === state.toolchainSource) {
+    return;
+  }
+
+  const previousSource = state.toolchainSource;
+  let changed = false;
+  setBusy(true, undefined, "tools");
+  try {
+    const appState = await invoke<AppState>("set_toolchain_source", { source });
+    state.toolsReady = false;
+    state.toolAction = null;
+    state.pendingToolManifestJson = null;
+    elements.toolList.replaceChildren();
+    applyAppState(appState);
+    invalidateParsedVideo(t("preview.toolsChanged"));
+    logEvent(t(source === "local" ? "event.localToolsSelected" : "event.managedToolsSelected"));
+    changed = true;
+  } catch (error) {
+    const message = String(error);
+    state.toolchainSource = previousSource;
+    renderToolchainSource();
+    showNotice(t("settings.toolSourceFailed", { message }), "error");
+  } finally {
+    setBusy(false);
+  }
+
+  if (changed) {
+    await verifyTools();
+  }
+}
+
+async function chooseLocalTool(tool: "yt-dlp" | "ffmpeg" | "deno") {
+  if (state.busy || state.toolchainSource !== "local") {
+    return;
+  }
+
+  const directory = tool === "ffmpeg";
+  const selected = await open({
+    multiple: false,
+    directory,
+    ...(directory
+      ? {}
+      : {
+          filters: [{ name: "Executable", extensions: ["exe"] }],
+        }),
+  });
+  if (typeof selected !== "string") {
+    return;
+  }
+
+  const config = { ...state.localToolchain };
+  if (tool === "yt-dlp") {
+    config.ytDlpPath = selected;
+  } else if (tool === "ffmpeg") {
+    config.ffmpegDirectory = selected;
+  } else {
+    config.denoPath = selected;
+  }
+  await saveLocalToolchain(config);
+}
+
+async function saveLocalToolchain(config: LocalToolchainConfig) {
+  let saved = false;
+  setBusy(true, undefined, "tools");
+  try {
+    const appState = await invoke<AppState>("set_local_toolchain", {
+      config: {
+        ytDlpPath: config.ytDlpPath ?? null,
+        ffmpegDirectory: config.ffmpegDirectory ?? null,
+        denoPath: config.denoPath ?? null,
+      },
+    });
+    state.toolsReady = false;
+    applyAppState(appState);
+    invalidateParsedVideo(t("preview.toolsChanged"));
+    saved = true;
+  } catch (error) {
+    showNotice(t("settings.localToolSaveFailed", { message: String(error) }), "error");
+  } finally {
+    setBusy(false);
+  }
+
+  if (saved) {
+    await verifyTools();
+  }
+}
+
+async function autoDetectLocalTools() {
+  if (state.busy || state.toolchainSource !== "local") {
+    return;
+  }
+
+  let detected = false;
+  setBusy(true, undefined, "tools");
+  elements.toolInstallStatus.textContent = t("settings.detectingLocalTools");
+  try {
+    const appState = await invoke<AppState>("auto_detect_local_toolchain");
+    state.toolsReady = false;
+    applyAppState(appState);
+    invalidateParsedVideo(t("preview.toolsChanged"));
+    detected = true;
+  } catch (error) {
+    showNotice(t("settings.localToolDetectFailed", { message: String(error) }), "error");
+  } finally {
+    setBusy(false);
+  }
+
+  if (detected) {
+    await verifyTools();
+  }
 }
 
 async function verifyTools(options: { quietReady?: boolean } = {}) {
@@ -697,10 +919,14 @@ async function verifyTools(options: { quietReady?: boolean } = {}) {
   elements.toolInstallStatus.textContent = t("settings.toolsChecking");
   try {
     const tools = await invoke<ToolStatus[]>("check_tools");
-    applyToolSummary(tools, "local", options);
+    applyToolSummary(
+      tools,
+      state.toolchainSource === "local" ? "local" : "managed",
+      options,
+    );
   } catch (error) {
     state.toolsReady = false;
-    state.toolAction = "install";
+    state.toolAction = state.toolchainSource === "managed" ? "install" : null;
     const message = String(error);
     elements.toolInstallStatus.textContent = message || t("settings.toolCheckFailed");
     showNotice(message || t("settings.toolCheckFailed"), "error");
@@ -711,7 +937,7 @@ async function verifyTools(options: { quietReady?: boolean } = {}) {
 }
 
 async function installTools() {
-  if (state.busy || !state.toolAction) {
+  if (state.busy || state.toolchainSource !== "managed" || !state.toolAction) {
     return;
   }
 
@@ -731,7 +957,7 @@ async function installTools() {
       : await invoke<ToolStatus[]>("install_tools", { githubAccessMode: state.githubAccessMode });
     state.pendingToolManifestJson = null;
     await loadAppState();
-    applyToolSummary(tools, "local");
+    applyToolSummary(tools, "managed");
     elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
     showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
     logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
@@ -746,7 +972,7 @@ async function installTools() {
 }
 
 async function checkToolUpdates() {
-  if (state.busy) {
+  if (state.busy || state.toolchainSource !== "managed") {
     return;
   }
 
@@ -804,7 +1030,7 @@ async function checkToolUpdates() {
 }
 
 async function reinstallTools() {
-  if (state.busy) {
+  if (state.busy || state.toolchainSource !== "managed") {
     return;
   }
 
@@ -821,7 +1047,7 @@ async function reinstallTools() {
       githubAccessMode: state.githubAccessMode,
     });
     await loadAppState();
-    applyToolSummary(tools, "local");
+    applyToolSummary(tools, "managed");
     elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
     showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
     logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
@@ -1200,6 +1426,35 @@ function renderToolchainRevision() {
     state.toolchainRevision ?? t("settings.noActiveRevision");
 }
 
+function renderToolchainSource() {
+  const isLocal = state.toolchainSource === "local";
+  elements.toolSourceManaged.classList.toggle("is-active", !isLocal);
+  elements.toolSourceLocal.classList.toggle("is-active", isLocal);
+  elements.toolSourceManaged.setAttribute("aria-pressed", String(!isLocal));
+  elements.toolSourceLocal.setAttribute("aria-pressed", String(isLocal));
+  elements.managedToolchainDetails.hidden = isLocal;
+  elements.localToolchainPaths.hidden = !isLocal;
+  elements.toolchainHint.textContent = t(
+    isLocal ? "settings.localToolchainHint" : "settings.toolchainHint",
+  );
+  elements.autoDetectLocalTools.title = t("settings.usePathHint");
+  elements.checkToolUpdates.hidden = isLocal;
+  elements.reinstallTools.hidden = isLocal;
+  updateToolActionButton();
+}
+
+function renderLocalToolchainPaths() {
+  renderLocalToolPath(elements.localYtDlpPath, state.localToolchainPaths.ytDlpPath);
+  renderLocalToolPath(elements.localFfmpegPath, state.localToolchainPaths.ffmpegDirectory);
+  renderLocalToolPath(elements.localDenoPath, state.localToolchainPaths.denoPath);
+}
+
+function renderLocalToolPath(element: HTMLElement, path?: string | null) {
+  const value = path?.trim() || "";
+  element.textContent = value || t("settings.localPathNotDetected");
+  element.title = value || t("settings.localPathNotDetected");
+}
+
 function applyToolSummary(
   tools: ToolStatus[],
   mode: ToolSummaryMode,
@@ -1280,7 +1535,8 @@ function setBusy(isBusy: boolean, progressText?: string, operation: "metadata" |
 }
 
 function updateToolActionButton() {
-  elements.installTools.hidden = state.toolAction === null;
+  elements.installTools.hidden =
+    state.toolchainSource === "local" || state.toolAction === null;
   if (!state.toolAction) {
     return;
   }
@@ -1318,10 +1574,16 @@ function updateButtons() {
   elements.cancel.disabled = state.activeOperation !== "download" || state.cancelRequested;
   elements.chooseCookies.disabled = state.busy;
   elements.clearCookies.disabled = state.busy || !state.cookiesFile;
+  elements.toolSourceManaged.disabled = state.busy;
+  elements.toolSourceLocal.disabled = state.busy;
+  elements.chooseLocalYtDlp.disabled = state.busy || state.toolchainSource !== "local";
+  elements.chooseLocalFfmpeg.disabled = state.busy || state.toolchainSource !== "local";
+  elements.chooseLocalDeno.disabled = state.busy || state.toolchainSource !== "local";
+  elements.autoDetectLocalTools.disabled = state.busy || state.toolchainSource !== "local";
   elements.verifyTools.disabled = state.busy;
-  elements.checkToolUpdates.disabled = state.busy;
+  elements.checkToolUpdates.disabled = state.busy || state.toolchainSource !== "managed";
   elements.installTools.disabled = state.busy || !state.toolAction;
-  elements.reinstallTools.disabled = state.busy;
+  elements.reinstallTools.disabled = state.busy || state.toolchainSource !== "managed";
   elements.browseFolder.disabled = state.busy;
   elements.saveFolder.disabled = state.busy;
   elements.resetFolder.disabled = state.busy;
