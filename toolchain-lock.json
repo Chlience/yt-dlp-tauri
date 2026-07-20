@@ -9,38 +9,38 @@
       "adapter": "github-release",
       "selection": "latest-stable",
       "repository": "denoland/deno",
-      "version": "v2.9.2",
+      "version": "v2.9.3",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 350916208,
-          "releaseTag": "v2.9.2",
-          "releasePublishedAtUtc": "2026-07-08T14:36:21Z",
-          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.2",
-          "assetId": 470252608,
+          "releaseId": 354502824,
+          "releaseTag": "v2.9.3",
+          "releasePublishedAtUtc": "2026-07-15T15:35:06Z",
+          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.3",
+          "assetId": 478036058,
           "assetName": "deno-x86_64-pc-windows-msvc.zip",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.2/deno-x86_64-pc-windows-msvc.zip",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.3/deno-x86_64-pc-windows-msvc.zip",
           "kind": "zip",
-          "size": 42721120,
-          "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
-            "size": 42721120,
-            "sha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf"
-          },
+          "size": 42726295,
+          "sha256": "60343461ac5fe3a31f4ef12667f2946bb852e20655c8610aeb7e751e87f7df3a",
           "members": [
             {
               "tool": "deno",
               "path": "Tools/win-x64/deno/deno.exe",
-              "size": 99115808,
-              "sha256": "a5270c2bb75a2ec12fef53185730327267d9e9fe6be6a962c5d1d5a050f93c88",
+              "size": 99143968,
+              "sha256": "bc925c8729f8764f750597f3a5a365f2a2dedc0c64d21a2997bc5f2255658fc9",
               "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
               "archivePathSuffix": "deno.exe",
               "archivePath": "deno.exe"
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260720.1",
+            "assetName": "deno-v2.9.3-deno-x86_64-pc-windows-msvc-60343461ac5fe3a3.zip",
+            "size": 42726295,
+            "sha256": "60343461ac5fe3a31f4ef12667f2946bb852e20655c8610aeb7e751e87f7df3a"
+          }
         }
       ]
     },
@@ -63,13 +63,6 @@
           "kind": "zip",
           "size": 167300768,
           "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
-            "size": 167300768,
-            "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7"
-          },
           "members": [
             {
               "tool": "ffmpeg",
@@ -89,7 +82,14 @@
               "archivePathSuffix": "bin/ffprobe.exe",
               "archivePath": "ffmpeg-N-125365-g9a01c1cb6a-win64-gpl/bin/ffprobe.exe"
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "ffmpeg-windows-autobuild-2026-06-30-16-38-ffmpeg-N-125365-g9a01c1cb6a-win64-gpl-99502f28cb80ab01.zip",
+            "size": 167300768,
+            "sha256": "99502f28cb80ab012746e1545463abe061375072c81f500ac5286da11beb00f7"
+          }
         }
       ],
       "redistribution": {
@@ -127,13 +127,6 @@
           "kind": "file",
           "size": 18226085,
           "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
-          "archive": {
-            "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
-            "size": 18226085,
-            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
-          },
           "members": [
             {
               "tool": "yt-dlp",
@@ -142,11 +135,18 @@
               "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
               "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
             }
-          ]
+          ],
+          "archive": {
+            "repository": "Chlience/yt-dlp-tauri-toolchain",
+            "releaseTag": "toolchain-20260712.1",
+            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
+            "size": 18226085,
+            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
+          }
         }
       ]
     }
   ],
-  "revision": "20260712.2",
-  "generatedAtUtc": "2026-07-12T13:48:31.000Z"
+  "revision": "20260720.1",
+  "generatedAtUtc": "2026-07-20T06:27:46.194Z"
 }
