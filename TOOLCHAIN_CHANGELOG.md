@@ -2,6 +2,12 @@
 
 Tool updates are published independently from application releases
 
+## 20260720.1 - 2026-07-20
+
+- `deno`: `v2.9.2` -> `v2.9.3`
+- `ffmpeg-windows`: `autobuild-2026-06-30-16-38` asset metadata updated
+- `yt-dlp`: `2026.07.04` asset metadata updated
+
 ## 20260712.2 - 2026-07-12
 
 - Recovered the stable channel with a normal immutable revision release

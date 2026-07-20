@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "revision": "20260712.2",
-  "retrievedAtUtc": "2026-07-12T13:48:31.000Z",
+  "revision": "20260720.1",
+  "retrievedAtUtc": "2026-07-20T06:27:46.194Z",
   "targets": [
     {
       "target": "win-x64",
@@ -44,11 +44,11 @@
         {
           "name": "deno",
           "path": "Tools/win-x64/deno/deno.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/deno-v2.9.2-deno-x86_64-pc-windows-msvc-5fe194d26ac5ef77.zip",
-          "sourceSize": 42721120,
-          "sourceSha256": "5fe194d26ac5ef77fcc5288c2c438c7a0465f3b6180440ebf04092714bf2dcdf",
-          "version": "2.9.2",
-          "sha256": "a5270c2bb75a2ec12fef53185730327267d9e9fe6be6a962c5d1d5a050f93c88",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260720.1/deno-v2.9.3-deno-x86_64-pc-windows-msvc-60343461ac5fe3a3.zip",
+          "sourceSize": 42726295,
+          "sourceSha256": "60343461ac5fe3a31f4ef12667f2946bb852e20655c8610aeb7e751e87f7df3a",
+          "version": "2.9.3",
+          "sha256": "bc925c8729f8764f750597f3a5a365f2a2dedc0c64d21a2997bc5f2255658fc9",
           "kind": "zip",
           "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
           "archivePathSuffix": "deno.exe"
