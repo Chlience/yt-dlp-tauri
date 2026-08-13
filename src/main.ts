@@ -43,6 +43,7 @@ type AppState = {
   local_toolchain: LocalToolchainConfig;
   local_toolchain_paths: LocalToolchainPaths;
   cookies_file?: string | null;
+  proxy?: string | null;
 };
 
 type ToolchainSource = "managed" | "local";
@@ -125,6 +126,16 @@ const translations = {
     "cookies.label": "Cookie file",
     "cookies.none": "No cookies",
     "cookies.chooseFile": "Choose Cookie file",
+    "proxy.label": "Download proxy",
+    "proxy.placeholder": "http://127.0.0.1:7890 or socks5://127.0.0.1:1080",
+    "proxy.none": "No proxy",
+    "proxy.clear": "Clear",
+    "proxy.save": "Save proxy",
+    "proxy.invalid": "Invalid proxy URL. Use http://, https://, socks4://, socks4a://, socks5:// or socks5h://.",
+    "notice.proxyUpdated": "Proxy updated.",
+    "notice.proxyCleared": "Proxy cleared.",
+    "event.proxyUpdated": "Proxy set: {proxy}",
+    "event.proxyCleared": "Proxy cleared.",
     "preview.thumbnailAlt": "video thumbnail",
     "preview.emptyImage": "Preview",
     "preview.label": "Preview",
@@ -292,6 +303,16 @@ const translations = {
     "cookies.label": "Cookie 文件",
     "cookies.none": "未使用 Cookie",
     "cookies.chooseFile": "选择 Cookie 文件",
+    "proxy.label": "下载代理",
+    "proxy.placeholder": "http://127.0.0.1:7890 或 socks5://127.0.0.1:1080",
+    "proxy.none": "未使用代理",
+    "proxy.clear": "清除",
+    "proxy.save": "保存代理",
+    "proxy.invalid": "代理地址格式不正确。请使用 http://、https://、socks4://、socks4a://、socks5:// 或 socks5h://。",
+    "notice.proxyUpdated": "代理已更新。",
+    "notice.proxyCleared": "代理已清除。",
+    "event.proxyUpdated": "代理已设置：{proxy}",
+    "event.proxyCleared": "代理已清除。",
     "preview.thumbnailAlt": "视频缩略图",
     "preview.emptyImage": "预览",
     "preview.label": "预览",
@@ -453,6 +474,7 @@ const state = {
   updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
   githubAccessMode: resolveInitialGithubAccessMode(),
   cookiesFile: null as string | null,
+  proxy: null as string | null,
   language: resolveInitialLanguage(),
   releaseNotesOpen: false,
   thumbnailCandidates: [] as string[],
@@ -511,6 +533,10 @@ const elements = {
   folderInput: must<HTMLInputElement>("#folder-input"),
   folderText: must<HTMLElement>("#folder-text"),
   cookiesFile: must<HTMLElement>("#cookies-file"),
+  proxyInput: must<HTMLInputElement>("#proxy-input"),
+  proxyText: must<HTMLElement>("#proxy-text"),
+  saveProxy: must<HTMLButtonElement>("#save-proxy"),
+  clearProxy: must<HTMLButtonElement>("#clear-proxy"),
   toolRoot: must<HTMLElement>("#tool-root"),
   toolchainHint: must<HTMLElement>("#toolchain-hint"),
   toolchainRevision: must<HTMLElement>("#toolchain-revision"),
@@ -608,6 +634,7 @@ function applyTranslations() {
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
+  renderProxy(state.proxy);
   updateGithubAccessButtons();
   updateToolActionButton();
   if (state.releaseNotesOpen) {
@@ -639,7 +666,9 @@ function setSettingsOpen(isOpen: boolean) {
   document.body.classList.toggle("settings-open", isOpen);
 
   if (isOpen) {
-    elements.settingsClose.focus();
+    elements.clearCookies.addEventListener("click", () => void clearCookiesFile());
+  elements.saveProxy.addEventListener("click", () => void saveProxy());
+  elements.clearProxy.addEventListener("click", () => void clearProxy());
   } else {
     elements.settingsToggle.focus();
   }
@@ -798,6 +827,7 @@ function applyAppState(appState: AppState) {
   renderToolchainSource();
   renderLocalToolchainPaths();
   renderCookiesFile(appState.cookies_file ?? null);
+  renderProxy(appState.proxy ?? null);
 }
 
 async function setToolchainSource(source: ToolchainSource) {
@@ -1070,7 +1100,7 @@ async function parseCurrentUrl() {
   setBusy(true, t("progress.parsing"), "metadata");
   renderEmptyPreview(t("preview.readingMetadata"));
   try {
-    const metadata = await invoke<VideoMetadata>("parse_metadata", { url });
+    const metadata = await invoke<VideoMetadata>("parse_metadata", { url, proxy: state.proxy });
     state.metadata = metadata;
     state.lastUrl = url;
     state.selectedFormat = metadata.format_options[0] ?? null;
@@ -1105,6 +1135,7 @@ async function downloadCurrentVideo() {
         url,
         format_selector: selectedFormat.format_selector,
         label: selectedFormat.label,
+        proxy: state.proxy,
       },
     });
     elements.progress.value = 100;
@@ -1565,6 +1596,53 @@ function renderCookiesFile(file: string | null) {
   elements.cookiesFile.textContent = state.cookiesFile ? fileNameFromPath(state.cookiesFile) : t("cookies.none");
   elements.cookiesFile.title = state.cookiesFile || t("cookies.none");
   updateButtons();
+}
+
+function renderProxy(proxy: string | null) {
+  state.proxy = proxy?.trim() || null;
+  elements.proxyText.textContent = state.proxy || t("proxy.none");
+  elements.proxyText.title = state.proxy || t("proxy.none");
+  elements.proxyInput.value = state.proxy || "";
+  updateButtons();
+}
+
+async function saveProxy() {
+  if (state.busy) {
+    return;
+  }
+  const value = elements.proxyInput.value.trim();
+  if (!value) {
+    showNotice(t("proxy.invalid"), "error");
+    return;
+  }
+  setBusy(true, undefined, "tools");
+  try {
+    const appState = await invoke<AppState>("set_proxy", { proxy: value });
+    renderProxy(appState.proxy ?? null);
+    showNotice(t("notice.proxyUpdated"), "success");
+    logEvent(t("event.proxyUpdated", { proxy: appState.proxy || value }));
+  } catch (error) {
+    showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function clearProxy() {
+  if (state.busy || !state.proxy) {
+    return;
+  }
+  setBusy(true, undefined, "tools");
+  try {
+    const appState = await invoke<AppState>("clear_proxy");
+    renderProxy(appState.proxy ?? null);
+    showNotice(t("notice.proxyCleared"), "success");
+    logEvent(t("event.proxyCleared"));
+  } catch (error) {
+    showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
+  }
 }
 
 function updateButtons() {
