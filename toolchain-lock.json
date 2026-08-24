@@ -113,40 +113,40 @@
       "adapter": "github-release",
       "selection": "latest-stable",
       "repository": "yt-dlp/yt-dlp",
-      "version": "2026.07.04",
+      "version": "2026.08.19",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 349050911,
-          "releaseTag": "2026.07.04",
-          "releasePublishedAtUtc": "2026-07-04T22:41:44Z",
-          "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.07.04",
-          "assetId": 466665334,
+          "releaseId": 373411891,
+          "releaseTag": "2026.08.19",
+          "releasePublishedAtUtc": "2026-08-19T23:48:43Z",
+          "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19",
+          "assetId": 521488854,
           "assetName": "yt-dlp.exe",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.07.04/yt-dlp.exe",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe",
           "kind": "file",
-          "size": 18226085,
-          "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+          "size": 17840399,
+          "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
           "members": [
             {
               "tool": "yt-dlp",
               "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
-              "size": 18226085,
-              "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+              "size": 17840399,
+              "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
               "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
             }
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260712.1",
-            "assetName": "yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
-            "size": 18226085,
-            "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8"
+            "releaseTag": "toolchain-20260824.1",
+            "assetName": "yt-dlp-2026.08.19-yt-dlp-66674953fe251b89.exe",
+            "size": 17840399,
+            "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a"
           }
         }
       ]
     }
   ],
-  "revision": "20260810.1",
-  "generatedAtUtc": "2026-08-10T04:56:37.742Z"
+  "revision": "20260824.1",
+  "generatedAtUtc": "2026-08-24T04:08:05.510Z"
 }
