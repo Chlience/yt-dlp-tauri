@@ -222,11 +222,11 @@ npm run tauri build
 
 ## 星标历史
 
-<a href="https://www.star-history.com/?repos=Chlience%2Fyt-dlp-tauri&type=date&legend=top-left">
+<a href="https://star-history.dera.page/#Chlience/yt-dlp-tauri&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
-   <img alt="星标历史图" src="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <img alt="星标历史图" src="https://star-history.dera.page/svg?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
  </picture>
 </a>
 
