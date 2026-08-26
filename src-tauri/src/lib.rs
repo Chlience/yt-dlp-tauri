@@ -41,6 +41,7 @@ const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
 const COOKIE_HEADER_EXPIRY: &str = "2147483647";
 const TOOLCHAIN_SOURCE_FILE: &str = "toolchain-source.txt";
 const LOCAL_TOOLCHAIN_CONFIG_FILE: &str = "local-toolchain.json";
+const PROXY_STATE_FILE: &str = "proxy.txt";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -53,6 +54,7 @@ struct AppState {
     local_toolchain: LocalToolchainConfig,
     local_toolchain_paths: LocalToolchainPaths,
     cookies_file: Option<String>,
+    proxy: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,6 +91,7 @@ struct DownloadRequest {
     url: String,
     format_selector: String,
     label: String,
+    proxy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,6 +228,36 @@ async fn clear_cookies_file() -> Result<AppState, String> {
             fs::remove_file(state_file).map_err(to_string)?;
         }
 
+        build_app_state(String::new())
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn set_proxy(proxy: String) -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let trimmed = proxy.trim();
+        if trimmed.is_empty() {
+            return Err("Proxy URL cannot be empty.".to_string());
+        }
+        validate_proxy_url(trimmed)?;
+        let state_dir = state_directory()?;
+        fs::create_dir_all(&state_dir).map_err(to_string)?;
+        fs::write(state_dir.join(PROXY_STATE_FILE), trimmed).map_err(to_string)?;
+        build_app_state(String::new())
+    })
+    .await
+    .map_err(join_error)?
+}
+
+#[tauri::command]
+async fn clear_proxy() -> Result<AppState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state_file = state_directory()?.join(PROXY_STATE_FILE);
+        if state_file.exists() {
+            fs::remove_file(state_file).map_err(to_string)?;
+        }
         build_app_state(String::new())
     })
     .await
@@ -401,7 +434,7 @@ async fn reinstall_tools(
 }
 
 #[tauri::command]
-async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, String> {
+async fn parse_metadata(app: AppHandle, url: String, proxy: Option<String>) -> Result<VideoMetadata, String> {
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&url)?;
         let tools = locate_tools(&app)?;
@@ -423,6 +456,7 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
             .args(yt_dlp_cookie_args(
                 cookies_file.as_ref().map(PreparedCookiesFile::path),
             ))
+            .args(yt_dlp_proxy_args(proxy.as_deref()))
             .arg(&url)
             .output()
             .map_err(|error| {
@@ -487,6 +521,7 @@ async fn download_video(
             .args(yt_dlp_cookie_args(
                 cookies_file.as_ref().map(PreparedCookiesFile::path),
             ))
+            .args(yt_dlp_proxy_args(request.proxy.as_deref()))
             .args([
                 "--progress-template",
                 &format!(
@@ -1324,6 +1359,7 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         local_toolchain,
         local_toolchain_paths,
         cookies_file: cookies_file()?.map(|path| path.display().to_string()),
+        proxy: read_proxy()?,
     })
 }
 
@@ -1381,6 +1417,19 @@ fn cookies_file() -> Result<Option<PathBuf>, String> {
         let value = value.trim();
         if !value.is_empty() {
             return Ok(Some(PathBuf::from(value)));
+        }
+    }
+
+    Ok(None)
+}
+
+fn read_proxy() -> Result<Option<String>, String> {
+    let configured = state_directory()?.join(PROXY_STATE_FILE);
+    if configured.exists() {
+        let value = fs::read_to_string(configured).map_err(to_string)?;
+        let value = value.trim();
+        if !value.is_empty() {
+            return Ok(Some(value.to_string()));
         }
     }
 
@@ -1453,6 +1502,13 @@ fn cookies_file_state_path() -> Result<PathBuf, String> {
 fn yt_dlp_cookie_args(cookies_file: Option<&Path>) -> Vec<String> {
     cookies_file
         .map(|path| vec!["--cookies".to_string(), path.display().to_string()])
+        .unwrap_or_default()
+}
+
+fn yt_dlp_proxy_args(proxy: Option<&str>) -> Vec<String> {
+    proxy
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| vec!["--proxy".to_string(), value.trim().to_string()])
         .unwrap_or_default()
 }
 
@@ -1774,6 +1830,29 @@ fn validate_http_url(url: &str) -> Result<(), String> {
     } else {
         Err("Enter a valid http or https video URL.".to_string())
     }
+}
+
+fn validate_proxy_url(proxy: &str) -> Result<(), String> {
+    let Some((scheme, rest)) = proxy.trim().split_once("://") else {
+        return Err(
+            "Proxy URL must include a scheme, e.g. http://, https://, socks5:// or socks5h://."
+                .to_string(),
+        );
+    };
+    let supported = matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h"
+    );
+    if !supported {
+        return Err(format!(
+            "Unsupported proxy scheme '{scheme}'. Use http://, https://, socks4://, socks4a://, socks5:// or socks5h://."
+        ));
+    }
+    let rest = rest.trim();
+    if rest.is_empty() || rest.contains(|c: char| c.is_whitespace()) {
+        return Err("Proxy URL is missing a host or contains invalid characters.".to_string());
+    }
+    Ok(())
 }
 
 fn first_line(bytes: &[u8]) -> Option<String> {
@@ -2185,6 +2264,42 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn omits_proxy_args_without_configured_proxy() {
+        assert!(yt_dlp_proxy_args(None).is_empty());
+        assert!(yt_dlp_proxy_args(Some("")).is_empty());
+        assert!(yt_dlp_proxy_args(Some("   ")).is_empty());
+    }
+
+    #[test]
+    fn passes_configured_proxy_to_yt_dlp() {
+        let args = yt_dlp_proxy_args(Some("socks5://127.0.0.1:1080"));
+        assert_eq!(
+            args,
+            vec!["--proxy".to_string(), "socks5://127.0.0.1:1080".to_string()]
+        );
+
+        let args = yt_dlp_proxy_args(Some(" http://user:pass@host:3128 "));
+        assert_eq!(
+            args,
+            vec!["--proxy".to_string(), "http://user:pass@host:3128".to_string()]
+        );
+    }
+
+    #[test]
+    fn validates_proxy_url_scheme() {
+        assert!(validate_proxy_url("https://127.0.0.1:8080").is_ok());
+        assert!(validate_proxy_url("http://proxy.example:7890").is_ok());
+        assert!(validate_proxy_url("socks5://127.0.0.1:1080").is_ok());
+        assert!(validate_proxy_url("socks5h://proxy.example:1080").is_ok());
+        assert!(validate_proxy_url("socks4://proxy.example:1080").is_ok());
+        assert!(validate_proxy_url("socks4a://proxy.example:1080").is_ok());
+        assert!(validate_proxy_url("ftp://127.0.0.1:21").is_err());
+        assert!(validate_proxy_url("socks5://").is_err());
+        assert!(validate_proxy_url("not-a-url").is_err());
+        assert!(validate_proxy_url("http://host with space:8080").is_err());
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2199,6 +2314,8 @@ pub fn run() {
             reset_download_directory,
             set_cookies_file,
             clear_cookies_file,
+            set_proxy,
+            clear_proxy,
             open_download_directory,
             set_toolchain_source,
             set_local_toolchain,

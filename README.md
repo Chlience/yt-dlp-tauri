@@ -26,6 +26,9 @@
 
 ---
 
+> **This repository is a derivative work of [Chlience/yt-dlp-tauri](https://github.com/Chlience/yt-dlp-tauri).**
+> Both the original project (Copyright (C) Chlience) and the modifications in this fork (Copyright (C) 2026 coxjjw) are distributed under [GPL-3.0](./LICENSE). See [NOTICE](./NOTICE) for attribution details.
+
 ## What is yt-dlp-tauri?
 
 `yt-dlp-tauri` is a small desktop app for downloading videos with `yt-dlp` without writing command-line options by hand. Paste a video URL from a [site supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), preview the metadata, choose a quality, and download an MP4-friendly file from a focused desktop UI.
@@ -43,6 +46,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Stage and verify every tool before atomic activation, preserving the active revision when an update fails.
 - Switch the UI between English and Chinese.
 - Check GitHub Releases for app updates, with optional `gh-proxy` routing for update and release access.
+- Configure a download proxy (`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`) forwarded to `yt-dlp` through `--proxy`, with URL validation and persistent storage.
 - Keep local operational logs for recent app activity.
 
 ## Tech Stack
@@ -123,6 +127,28 @@ Current release scope:
 Settings can switch the complete toolchain between `Managed` and `Local`. Local mode searches the current process `PATH` for `yt-dlp.exe`, `deno.exe`, and one directory containing both `ffmpeg.exe` and `ffprobe.exe`. The path controls can select an absolute yt-dlp executable, FFmpeg directory, or Deno executable when a tool is outside `PATH`. `Use PATH` clears those overrides and resolves all tools from `PATH` again.
 
 Local tools are checked by running their version commands and the same deterministic media compatibility fixture used for managed revisions. The app does not pin hashes, install updates, or replace local executables. Local programs run with the user's permissions; the selected yt-dlp executable receives video URLs and the selected Cookie file, so only trusted binaries should be configured.
+
+## Download Proxy
+
+The app can route `yt-dlp` downloads through a proxy server. This is independent from the `gh-proxy` mode, which is used only for update and release access.
+
+### Configure
+
+1. Open **Settings**.
+2. In the **Download proxy** section, enter a proxy URL such as `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`.
+3. Click **Save proxy**. The URL is validated (scheme + host) and persisted to:
+   ```text
+   %LOCALAPPDATA%\yt-dlp-tauri\state\proxy.txt
+   ```
+4. Click **Clear** to remove the proxy.
+
+The proxy is forwarded to `yt-dlp` through `--proxy` for both metadata parsing and downloads. When no proxy is configured, no `--proxy` argument is passed.
+
+### Supported schemes
+
+`http`, `https`, `socks4`, `socks4a`, `socks5`, `socks5h`
+
+A URL without a scheme (for example `127.0.0.1:1080`) is rejected with a validation message.
 
 ## Toolchain Maintenance
 
@@ -222,11 +248,11 @@ npm run tauri build
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Chlience%2Fyt-dlp-tauri&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=coxjjw%2Fyt-dlp-tauri&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -242,8 +268,23 @@ Before publishing a release:
 6. Confirm generated folders and restored tools are not staged.
 7. Include the GPL license and third-party notices with the release.
 
+## Secondary Development
+
+This repository is a fork of [coxjjw/yt-dlp-tauri](https://github.com/coxjjw/yt-dlp-tauri), created to add download-proxy support. It is distributed under the same [GPL-3.0](./LICENSE) terms; see [NOTICE](./NOTICE) for upstream attribution.
+
+### Changes in this fork
+
+- **Download proxy**: new Tauri commands `set_proxy` / `clear_proxy` with URL validation (`http/https/socks4/socks4a/socks5/socks5h`), proxy state persisted to `%LOCALAPPDATA%/yt-dlp-tauri/state/proxy.txt`, and the proxy forwarded to `yt-dlp` through `--proxy` in both metadata parsing and downloads.
+- **Frontend**: a "Download proxy" settings section (input + Save/Clear) with English/Chinese localization and full app-state wiring.
+- **Tests**: three Rust unit tests covering proxy argument injection and scheme validation.
+- **CI**: `build-exe.yml` builds the Windows x64 NSIS installer on push via GitHub Actions (Rust + MSVC + WebView2 runner).
+
+### Building the Windows executable
+
+A local Windows machine with Rust + MSVC can run `npm run tauri build`. Without those tools, push to `main` and let `build-exe.yml` produce the installer as a workflow artifact.
+
 ## Legal
 
-This project is licensed under GPL-3.0. The app downloads and uses third-party command-line tools with their own licenses and redistribution obligations. See [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
+This repository is a derivative work of [coxjjw/yt-dlp-tauri](https://github.com/coxjjw/yt-dlp-tauri) (Copyright (C) Chlience), with modifications by coxjjw. Both are licensed under GPL-3.0; attribution is recorded in [NOTICE](./NOTICE). The app downloads and uses third-party command-line tools with their own licenses and redistribution obligations. See [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
 
 This project is not affiliated with `yt-dlp`, FFmpeg, Deno, or Tauri.

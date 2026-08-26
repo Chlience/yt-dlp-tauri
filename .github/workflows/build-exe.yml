@@ -1,0 +1,56 @@
+name: Build Windows EXE
+
+# 推送 main 或手动触发时，在 GitHub 云端 Windows runner 上编译出可运行的 exe 安装包，
+# 并作为 artifact 上传（保留 14 天），便于直接下载测试。
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-exe:
+    name: Windows x64 EXE
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Test Rust backend
+        run: cargo test --manifest-path ./src-tauri/Cargo.toml --lib
+
+      - name: Build Tauri app (NSIS installer + exe)
+        run: npm run tauri build -- --bundles nsis
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yt-dlp-tauri-windows-x64
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/yt-dlp-tauri.exe
+          if-no-files-found: warn
+          retention-days: 14

@@ -26,6 +26,9 @@
 
 ---
 
+> **本仓库是 [Chlience/yt-dlp-tauri](https://github.com/Chlience/yt-dlp-tauri) 的衍生作品。**
+> 原项目（Copyright (C) Chlience）与本 fork 的修改（Copyright (C) 2026 coxjjw）均基于 [GPL-3.0](./LICENSE) 分发。署名详情见 [NOTICE](./NOTICE)。
+
 ## 项目是什么？
 
 `yt-dlp-tauri` 是一个基于 `yt-dlp` 的小型桌面下载器，用来避免手写命令行参数。粘贴来自 [yt-dlp 支持站点](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)的视频链接、预览信息、选择清晰度，然后通过专注的桌面界面下载 MP4 友好的文件。
@@ -43,6 +46,7 @@
 - 完整 staging 并校验所有工具后再原子激活，更新失败时保留当前可用 revision。
 - 支持中英文界面切换。
 - 检查 GitHub Releases 中的应用更新，并可为更新检查和 release 链接启用 `gh-proxy`。
+- 可为 `yt-dlp` 下载配置代理（`http`、`https`、`socks4`、`socks4a`、`socks5`、`socks5h`），通过 `--proxy` 转发给 `yt-dlp`，并做 URL 校验与持久化存储。
 - 写入本地运行日志，方便查看最近的应用事件。
 
 ## 技术栈
@@ -123,6 +127,28 @@ src-tauri\target\release\bundle\nsis\
 Settings 可将完整工具链切换为 `应用管理` 或 `本地工具`。本地模式会在当前进程的 `PATH` 中查找 `yt-dlp.exe`、`deno.exe`，并查找同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录。工具不在 `PATH` 中时，可以分别选择 yt-dlp 可执行文件、FFmpeg 目录和 Deno 可执行文件的绝对路径。`使用 PATH` 会清除这些覆盖路径，再次从 `PATH` 解析全部工具。
 
 应用会运行本地工具的版本命令，并执行与受管 revision 相同的确定性媒体兼容性测试。应用不会固定本地文件哈希、安装更新或替换本地程序。本地程序以当前用户权限运行；所选 yt-dlp 会接收视频 URL 和 Cookie 文件，因此应只配置可信的可执行文件。
+
+## 下载代理
+
+应用可以通过代理服务器路由 `yt-dlp` 下载。它与仅用于更新和 release 访问的 `gh-proxy` 模式相互独立。
+
+### 配置
+
+1. 打开 **Settings**。
+2. 在 **Download proxy（下载代理）** 区域填入代理 URL，例如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080`。
+3. 点击 **Save proxy（保存代理）**。会校验 URL（scheme + host）并持久化到：
+   ```text
+   %LOCALAPPDATA%\yt-dlp-tauri\state\proxy.txt
+   ```
+4. 点击 **Clear（清除）** 移除代理。
+
+代理会在解析信息与下载时通过 `--proxy` 转发给 `yt-dlp`。未配置代理时不传递 `--proxy` 参数。
+
+### 支持的协议
+
+`http`、`https`、`socks4`、`socks4a`、`socks5`、`socks5h`
+
+缺少 scheme 的 URL（例如 `127.0.0.1:1080`）会被校验拒绝并提示。
 
 ## 工具链维护
 
@@ -222,11 +248,11 @@ npm run tauri build
 
 ## 星标历史
 
-<a href="https://www.star-history.com/?repos=Chlience%2Fyt-dlp-tauri&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=coxjjw%2Fyt-dlp-tauri&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
-   <img alt="星标历史图" src="https://api.star-history.com/chart?repos=Chlience/yt-dlp-tauri&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&legend=top-left" />
+   <img alt="星标历史图" src="https://api.star-history.com/chart?repos=coxjjw/yt-dlp-tauri&type=date&legend=top-left" />
  </picture>
 </a>
 
@@ -242,8 +268,23 @@ npm run tauri build
 6. 确认生成目录和还原出来的工具没有被 staged。
 7. 随 release 保留 GPL 许可证和第三方声明。
 
+## 二次开发
+
+本仓库是 [coxjjw/yt-dlp-tauri](https://github.com/coxjjw/yt-dlp-tauri) 的 fork，目的是增加下载代理支持。它沿用相同的 [GPL-3.0](./LICENSE) 条款分发；上游署名见 [NOTICE](./NOTICE)。
+
+### 本 fork 的改动
+
+- **下载代理**：新增 Tauri 命令 `set_proxy` / `clear_proxy`，带 URL 校验（`http/https/socks4/socks4a/socks5/socks5h`），代理状态持久化到 `%LOCALAPPDATA%/yt-dlp-tauri/state/proxy.txt`，并在解析信息与下载时通过 `--proxy` 转发给 `yt-dlp`。
+- **前端**：新增"下载代理"设置区（输入框 + 保存/清除），含中英双语文案与完整 app-state 联动。
+- **测试**：三个 Rust 单元测试，覆盖代理参数注入与 scheme 校验。
+- **CI**：`build-exe.yml` 在 push 时通过 GitHub Actions（Rust + MSVC + WebView2 runner）构建 Windows x64 NSIS 安装包。
+
+### 构建 Windows 可执行文件
+
+装有 Rust + MSVC 的本地 Windows 机器可直接运行 `npm run tauri build`。若没有这些工具，推送至 `main` 后由 `build-exe.yml` 把安装包作为 workflow artifact 产出。
+
 ## 法律说明
 
-本项目使用 GPL-3.0 许可证。应用会下载并使用第三方命令行工具，这些工具有各自的许可证和再分发义务。详见 [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md)。
+本仓库是 [coxjjw/yt-dlp-tauri](https://github.com/coxjjw/yt-dlp-tauri)（Copyright (C) Chlience）的衍生作品，由 coxjjw 修改。两者均基于 GPL-3.0 许可，署名记录见 [NOTICE](./NOTICE)。应用会下载并使用第三方命令行工具，这些工具有各自的许可证和再分发义务。详见 [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md)。
 
 本项目不隶属于 `yt-dlp`、FFmpeg、Deno 或 Tauri。
