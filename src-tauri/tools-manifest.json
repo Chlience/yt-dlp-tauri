@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "revision": "20260810.1",
-  "retrievedAtUtc": "2026-08-10T04:56:37.742Z",
+  "revision": "20260824.1",
+  "retrievedAtUtc": "2026-08-24T04:08:05.510Z",
   "targets": [
     {
       "target": "win-x64",
@@ -9,11 +9,11 @@
         {
           "name": "yt-dlp",
           "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260712.1/yt-dlp-2026.07.04-yt-dlp-52fe3c26dcf71fbd.exe",
-          "sourceSize": 18226085,
-          "sourceSha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
-          "version": "2026.07.04",
-          "sha256": "52fe3c26dcf71fbdc85b528589020bb0b8e383155cfa81b64dd447bbe35e24b8",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260824.1/yt-dlp-2026.08.19-yt-dlp-66674953fe251b89.exe",
+          "sourceSize": 17840399,
+          "sourceSha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
+          "version": "2026.08.19",
+          "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
           "kind": "file",
           "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
         },
