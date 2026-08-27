@@ -8,6 +8,11 @@ on:
       - src-tauri/tools-manifest.json
   workflow_dispatch:
     inputs:
+      candidate_commit:
+        description: "Merged toolchain commit to recover"
+        required: false
+        default: ""
+        type: string
       rollback_revision:
         description: "Historical toolchain revision to promote"
         required: false
@@ -72,8 +77,9 @@ jobs:
       - name: Resolve exact pull request artifacts
         id: resolve
         env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit || github.sha }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/resolve-toolchain-artifact.mjs
+        run: node scripts/resolve-toolchain-artifact.mjs --commit-sha "$CANDIDATE_COMMIT"
 
       - name: Download exact candidate artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
@@ -247,8 +253,16 @@ jobs:
           [[ -n "$CLIENT_ID" && -n "$APP_PRIVATE_KEY" ]]
           main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq '.object.sha')"
           if [[ "$main_sha" != "$GITHUB_SHA" ]]; then
-            echo "Refusing stale main commit $GITHUB_SHA; current main is $main_sha" >&2
-            exit 1
+            git fetch --no-tags origin "$main_sha"
+            git merge-base --is-ancestor "$GITHUB_SHA" "$main_sha" || {
+              echo "Refusing non-ancestor main commit $GITHUB_SHA; current main is $main_sha" >&2
+              exit 1
+            }
+            git diff --quiet "$GITHUB_SHA" "$main_sha" -- \
+              toolchain-lock.json src-tauri/tools-manifest.json || {
+              echo "Refusing stale toolchain files from $GITHUB_SHA; current main is $main_sha" >&2
+              exit 1
+            }
           fi
           if [[ -z "$ROLLBACK_REVISION" ]]; then
             node scripts/verify-toolchain-candidate.mjs \

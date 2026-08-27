@@ -62,7 +62,7 @@ test("toolchain automation pins every third-party action to a commit", () => {
   }
 });
 
-test("publisher validates exact main before promoting immutable assets", () => {
+test("publisher tolerates unrelated main advances without accepting stale toolchains", () => {
   const path = ".github/workflows/toolchain-publish.yml";
   assert.equal(existsSync(path), true);
   const workflow = readFileSync(path, "utf8");
@@ -71,6 +71,7 @@ test("publisher validates exact main before promoting immutable assets", () => {
   assert.match(workflow, /push:\s*\n\s*branches:\s*\[main\]/u);
   assert.match(workflow, /paths:\s*\n\s*- toolchain-lock\.json\s*\n\s*- src-tauri\/tools-manifest\.json/u);
   assert.match(workflow, /workflow_dispatch:/u);
+  assert.match(workflow, /candidate_commit:\s*\n\s*description:/u);
   assert.match(workflow, /group: toolchain-publish/u);
   assert.match(workflow, /cancel-in-progress: false/u);
   assert.match(workflow, /^permissions:\s*\n\s*contents: read$/mu);
@@ -78,7 +79,13 @@ test("publisher validates exact main before promoting immutable assets", () => {
   assert.match(workflow, /publish:\s*\n\s*name: Publish validated toolchain[\s\S]*?permissions:\s*\n\s*contents: write/u);
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/u);
   assert.match(workflow, /node scripts\/resolve-toolchain-artifact\.mjs/u);
+  assert.match(workflow, /--commit-sha "\$CANDIDATE_COMMIT"/u);
   assert.match(workflow, /git\/ref\/heads\/main/u);
+  assert.match(workflow, /git merge-base --is-ancestor "\$GITHUB_SHA" "\$main_sha"/u);
+  assert.match(
+    workflow,
+    /git diff --quiet "\$GITHUB_SHA" "\$main_sha" --[\s\\]+toolchain-lock\.json src-tauri\/tools-manifest\.json/u,
+  );
   assert.match(workflow, /toolchain-validation-report/u);
   assert.match(workflow, /node scripts\/publish-toolchain\.mjs[\s\\]+--input/u);
   assert.match(workflow, /Chlience\/yt-dlp-tauri-toolchain/u);
