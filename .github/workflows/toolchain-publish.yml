@@ -180,6 +180,7 @@ jobs:
       candidate_repository_id: ${{ needs.handoff.outputs.candidate_repository_id }}
       candidate_pull_request: ${{ needs.handoff.outputs.candidate_pull_request }}
       candidate_head_sha: ${{ needs.handoff.outputs.candidate_head_sha }}
+      publication_commit_sha: ${{ inputs.candidate_commit || github.sha }}
 
   rollback-approval:
     name: Approve revalidation bypass

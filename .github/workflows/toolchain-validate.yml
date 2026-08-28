@@ -45,6 +45,11 @@ on:
         required: false
         default: ""
         type: string
+      publication_commit_sha:
+        description: "Merged commit SHA recorded in the publication report"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -724,7 +729,7 @@ jobs:
         id: aggregate
         continue-on-error: true
         env:
-          COMMIT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          COMMIT_SHA: ${{ inputs.publication_commit_sha || (github.event_name == 'pull_request' && github.event.pull_request.head.sha) || github.sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           GH_TOKEN: ${{ github.token }}

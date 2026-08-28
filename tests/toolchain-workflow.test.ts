@@ -80,6 +80,10 @@ test("publisher tolerates unrelated main advances without accepting stale toolch
   assert.match(workflow, /github\.ref == 'refs\/heads\/main'/u);
   assert.match(workflow, /node scripts\/resolve-toolchain-artifact\.mjs/u);
   assert.match(workflow, /--commit-sha "\$CANDIDATE_COMMIT"/u);
+  assert.match(
+    workflow,
+    /publication_commit_sha: \$\{\{ inputs\.candidate_commit \|\| github\.sha \}\}/u,
+  );
   assert.match(workflow, /git\/ref\/heads\/main/u);
   assert.match(workflow, /git merge-base --is-ancestor "\$GITHUB_SHA" "\$main_sha"/u);
   assert.match(
@@ -231,6 +235,7 @@ test("validation workflow uses native targets with read-only permissions", () =>
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /workflow_call:/);
+  assert.match(workflow, /publication_commit_sha:\s*\n\s*description:/u);
   assert.match(workflow, /windows-latest/);
   assert.doesNotMatch(workflow, /macos|darwin|apple/iu);
   assert.match(workflow, /name: toolchain-validation/);
@@ -269,7 +274,7 @@ test("validation prepares one candidate bundle and reuses it on native runners",
   assert.match(workflow, /--asset-root\s+\.toolchain\/candidate/u);
   assert.match(
     workflow,
-    /Merge and validate native reports[\s\S]*?env:\s*\n\s*COMMIT_SHA: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/u,
+    /Merge and validate native reports[\s\S]*?env:\s*\n\s*COMMIT_SHA: \$\{\{ inputs\.publication_commit_sha \|\| \(github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha\) \|\| github\.sha \}\}/u,
   );
 });
 
