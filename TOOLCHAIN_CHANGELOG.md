@@ -2,6 +2,10 @@
 
 Tool updates are published independently from application releases
 
+## 20260831.1 - 2026-08-31
+
+- `deno`: `v2.9.5` -> `v2.9.6`
+
 ## 20260824.1 - 2026-08-24
 
 - `yt-dlp`: `2026.07.04` -> `2026.08.19`
