@@ -9,26 +9,26 @@
       "adapter": "github-release",
       "selection": "latest-stable",
       "repository": "denoland/deno",
-      "version": "v2.9.5",
+      "version": "v2.9.6",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 366221590,
-          "releaseTag": "v2.9.5",
-          "releasePublishedAtUtc": "2026-08-06T15:05:43Z",
-          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.5",
-          "assetId": 503940054,
+          "releaseId": 377977747,
+          "releaseTag": "v2.9.6",
+          "releasePublishedAtUtc": "2026-08-27T17:29:30Z",
+          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.6",
+          "assetId": 532587411,
           "assetName": "deno-x86_64-pc-windows-msvc.zip",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.5/deno-x86_64-pc-windows-msvc.zip",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.6/deno-x86_64-pc-windows-msvc.zip",
           "kind": "zip",
-          "size": 42691248,
-          "sha256": "171efab55ac6b9881fd53ee4c20f8bf3bb1340ffc618483746909014db12216a",
+          "size": 42601047,
+          "sha256": "15e5300b0ba3c3695a7621d90160a746ec9e710228cee639afa9d580f6e3cd11",
           "members": [
             {
               "tool": "deno",
               "path": "Tools/win-x64/deno/deno.exe",
-              "size": 97408288,
-              "sha256": "98f8c2a2d470e4ccb04c935c86ff8050817d877762aec5eaeeb9e409ccb3b9fd",
+              "size": 97316640,
+              "sha256": "2ff9493dfa356be2975f477025ea770088e9e9cb2c83d983236d13561b96b7a6",
               "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
               "archivePathSuffix": "deno.exe",
               "archivePath": "deno.exe"
@@ -36,10 +36,10 @@
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260810.1",
-            "assetName": "deno-v2.9.5-deno-x86_64-pc-windows-msvc-171efab55ac6b988.zip",
-            "size": 42691248,
-            "sha256": "171efab55ac6b9881fd53ee4c20f8bf3bb1340ffc618483746909014db12216a"
+            "releaseTag": "toolchain-20260831.1",
+            "assetName": "deno-v2.9.6-deno-x86_64-pc-windows-msvc-15e5300b0ba3c369.zip",
+            "size": 42601047,
+            "sha256": "15e5300b0ba3c3695a7621d90160a746ec9e710228cee639afa9d580f6e3cd11"
           }
         }
       ]
@@ -147,6 +147,6 @@
       ]
     }
   ],
-  "revision": "20260824.1",
-  "generatedAtUtc": "2026-08-24T04:08:05.510Z"
+  "revision": "20260831.1",
+  "generatedAtUtc": "2026-08-31T09:50:32.351Z"
 }
