@@ -3,19 +3,18 @@ use serde_json::Value;
 use std::{
     collections::BTreeSet,
     env,
-    ffi::OsStr,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{Arc, Mutex},
-    thread,
-    time::{SystemTime, UNIX_EPOCH},
+    process::Command,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
 
 mod cookies;
+mod process;
 use cookies::PreparedCookiesFile;
+use process::ProcessState;
 
 pub mod toolchain;
 
@@ -43,8 +42,6 @@ const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
 const TOOLCHAIN_SOURCE_FILE: &str = "toolchain-source.txt";
 const LOCAL_TOOLCHAIN_CONFIG_FILE: &str = "local-toolchain.json";
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Serialize)]
 struct AppState {
@@ -118,12 +115,6 @@ struct LatestToolManifestResult {
     manifest_json: Option<String>,
     revision: Option<String>,
     source: Option<String>,
-}
-
-#[derive(Clone, Default)]
-struct DownloadProcessState {
-    active_pid: Arc<Mutex<Option<u32>>>,
-    cancel_requested: Arc<Mutex<bool>>,
 }
 
 #[tauri::command]
@@ -375,7 +366,12 @@ async fn reinstall_tools(
 }
 
 #[tauri::command]
-async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, String> {
+async fn parse_metadata(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    url: String,
+) -> Result<VideoMetadata, String> {
+    let task = process_state.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&url)?;
         let tools = locate_tools(&app)?;
@@ -383,8 +379,8 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
         let cookies_file = prepared_cookies_file_for_url(&url)?;
         append_log("metadata", &format!("Parsing {url}"));
 
-        let mut command = background_command(&tools.yt_dlp);
-        let output = command
+        let mut command = Command::new(&tools.yt_dlp);
+        command
             .args([
                 "--ignore-config",
                 "--no-playlist",
@@ -397,14 +393,17 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
             .args(yt_dlp_cookie_args(
                 cookies_file.as_ref().map(PreparedCookiesFile::path),
             ))
-            .arg(&url)
-            .output()
-            .map_err(|error| {
-                format!(
-                    "Failed to start yt-dlp at {}: {error}",
-                    tools.yt_dlp.display()
-                )
-            })?;
+            .arg(&url);
+        let mut json = String::new();
+        let output = task.run(
+            &mut command,
+            "Video metadata parsing",
+            Some(Duration::from_secs(120)),
+            |line| {
+                json.push_str(line);
+                json.push('\n');
+            },
+        )?;
 
         if !output.status.success() {
             append_log("metadata", "Failed to parse metadata.");
@@ -412,11 +411,11 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
                 "Failed to parse video metadata.",
                 output.status.code(),
                 &output.stderr,
-                &output.stdout,
+                json.as_bytes(),
             ));
         }
 
-        parse_metadata_json(&String::from_utf8_lossy(&output.stdout), &url)
+        parse_metadata_json(&json, &url)
     })
     .await
     .map_err(join_error)?
@@ -425,10 +424,10 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
 #[tauri::command]
 async fn download_video(
     app: AppHandle,
-    process_state: tauri::State<'_, DownloadProcessState>,
+    process_state: tauri::State<'_, ProcessState>,
     request: DownloadRequest,
 ) -> Result<Option<String>, String> {
-    let process_state = process_state.inner().clone();
+    let task = process_state.begin()?;
 
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&request.url)?;
@@ -439,8 +438,8 @@ async fn download_video(
         let cookies_file = prepared_cookies_file_for_url(&request.url)?;
         append_log("download", &format!("Starting {} {}", request.label, request.url));
 
-        let mut command = background_command(&tools.yt_dlp);
-        let mut child = command
+        let mut command = Command::new(&tools.yt_dlp);
+        command
             .args([
                 "--ignore-config",
                 "--no-playlist",
@@ -471,13 +470,7 @@ async fn download_video(
                 &format!("after_move:{}%(filepath)s", OUTPUT_PATH_PREFIX),
                 "--progress",
             ])
-            .arg(&request.url)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("Failed to start yt-dlp at {}: {error}", tools.yt_dlp.display()))?;
-        let pid = child.id();
-        set_active_process(&process_state, pid)?;
+            .arg(&request.url);
 
         emit_progress(
             &app,
@@ -490,64 +483,24 @@ async fn download_video(
             },
         );
 
-        let output_path = Arc::new(Mutex::new(None::<String>));
-        let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-
-        let stdout_handle = child.stdout.take().map(|stdout| {
-            let app = app.clone();
-            let output_path = Arc::clone(&output_path);
-            thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    if let Some(progress) = parse_progress_line(&line) {
-                        emit_progress(&app, progress);
-                    }
-
-                    if let Some(path) = line.strip_prefix(OUTPUT_PATH_PREFIX) {
-                        if let Ok(mut guard) = output_path.lock() {
-                            *guard = Some(path.trim().to_string());
-                        }
-                    }
-                }
-            })
-        });
-
-        let stderr_handle = child.stderr.take().map(|stderr| {
-            let stderr_lines = Arc::clone(&stderr_lines);
-            thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    if let Ok(mut guard) = stderr_lines.lock() {
-                        guard.push(line);
-                    }
-                }
-            })
-        });
-
-        let status = child.wait().map_err(to_string)?;
-        if let Some(handle) = stdout_handle {
-            let _ = handle.join();
-        }
-        if let Some(handle) = stderr_handle {
-            let _ = handle.join();
-        }
-
-        if !status.success() {
-            let details = stderr_lines.lock().map(|lines| lines.join("\n")).unwrap_or_default();
-            let cancelled = was_cancel_requested(&process_state);
-            clear_active_process(&process_state, pid);
-            if cancelled {
-                append_log("download", "Cancelled by user.");
-                return Err("Download cancelled.".to_string());
+        let mut output_path = None;
+        let output = task.run(&mut command, "Video download", None, |line| {
+            if let Some(progress) = parse_progress_line(line) {
+                emit_progress(&app, progress);
             }
-            append_log("download", &format!("Failed. {details}"));
+            if let Some(path) = line.strip_prefix(OUTPUT_PATH_PREFIX) {
+                output_path = Some(path.trim().to_string());
+            }
+        })?;
+        if !output.status.success() {
+            append_log("download", &format!("Failed. {}", String::from_utf8_lossy(&output.stderr)));
             return Err(process_failure_message(
                 "Download failed.",
-                status.code(),
-                details.as_bytes(),
+                output.status.code(),
+                &output.stderr,
                 &[],
             ));
         }
-
-        clear_active_process(&process_state, pid);
 
         emit_progress(
             &app,
@@ -560,7 +513,7 @@ async fn download_video(
             },
         );
 
-        let saved_path = output_path.lock().ok().and_then(|guard| guard.clone());
+        let saved_path = output_path;
         append_log("download", &format!("Completed. Output={}", saved_path.as_deref().unwrap_or("unknown")));
         Ok(saved_path)
     })
@@ -569,26 +522,8 @@ async fn download_video(
 }
 
 #[tauri::command]
-async fn cancel_download(
-    process_state: tauri::State<'_, DownloadProcessState>,
-) -> Result<(), String> {
-    let pid = {
-        let guard = process_state.active_pid.lock().map_err(lock_error)?;
-        *guard
-    };
-
-    let Some(pid) = pid else {
-        return Ok(());
-    };
-
-    {
-        let mut guard = process_state.cancel_requested.lock().map_err(lock_error)?;
-        *guard = true;
-    }
-
-    tauri::async_runtime::spawn_blocking(move || kill_process_tree(pid))
-        .await
-        .map_err(join_error)?
+fn cancel_download(process_state: tauri::State<'_, ProcessState>) -> Result<(), String> {
+    process_state.cancel()
 }
 
 fn locate_tools(app: &AppHandle) -> Result<ToolPaths, String> {
@@ -1240,37 +1175,6 @@ fn emit_tool_install_progress(app: &AppHandle, progress: ToolInstallProgress) {
     let _ = app.emit("tool-install-progress", progress);
 }
 
-fn set_active_process(state: &DownloadProcessState, pid: u32) -> Result<(), String> {
-    {
-        let mut guard = state.active_pid.lock().map_err(lock_error)?;
-        *guard = Some(pid);
-    }
-    {
-        let mut guard = state.cancel_requested.lock().map_err(lock_error)?;
-        *guard = false;
-    }
-    Ok(())
-}
-
-fn clear_active_process(state: &DownloadProcessState, pid: u32) {
-    if let Ok(mut guard) = state.active_pid.lock() {
-        if guard.is_some_and(|active_pid| active_pid == pid) {
-            *guard = None;
-        }
-    }
-    if let Ok(mut guard) = state.cancel_requested.lock() {
-        *guard = false;
-    }
-}
-
-fn was_cancel_requested(state: &DownloadProcessState) -> bool {
-    state
-        .cancel_requested
-        .lock()
-        .map(|guard| *guard)
-        .unwrap_or(false)
-}
-
 fn build_app_state(tools_root: String) -> Result<AppState, String> {
     let target = current_tool_target()?;
     let toolchain_source = read_toolchain_source()?;
@@ -1300,34 +1204,6 @@ fn optional_input_path(value: Option<String>) -> Option<PathBuf> {
     value
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
-}
-
-fn kill_process_tree(pid: u32) -> Result<(), String> {
-    let pid_text = pid.to_string();
-    let mut command = if cfg!(target_os = "windows") {
-        let mut command = background_command("taskkill");
-        command.args(["/PID", &pid_text, "/T", "/F"]);
-        command
-    } else {
-        let mut command = background_command("kill");
-        command.args(["-TERM", &pid_text]);
-        command
-    };
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to start cancel command for process {pid}: {error}"))?;
-
-    if output.status.success() {
-        append_log("download", &format!("Cancel requested for process {pid}."));
-        Ok(())
-    } else {
-        Err(process_failure_message(
-            &format!("Failed to cancel process {pid}."),
-            output.status.code(),
-            &output.stderr,
-            &output.stdout,
-        ))
-    }
 }
 
 fn download_directory() -> Result<PathBuf, String> {
@@ -1490,20 +1366,6 @@ fn home_directory() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn background_command(program: impl AsRef<OsStr>) -> Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut command = Command::new(program);
-        command.creation_flags(CREATE_NO_WINDOW);
-        command
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new(program)
-    }
-}
-
 fn validate_http_url(url: &str) -> Result<(), String> {
     cookies::http_url(url).map(|_| ())
 }
@@ -1567,10 +1429,6 @@ fn open_path(path: &Path) -> Result<(), String> {
 
 fn to_string(error: impl std::fmt::Display) -> String {
     error.to_string()
-}
-
-fn lock_error(error: impl std::fmt::Display) -> String {
-    format!("State lock failed: {error}")
 }
 
 fn join_error(error: impl std::fmt::Display) -> String {
@@ -1880,7 +1738,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(DownloadProcessState::default())
+        .manage(ProcessState::default())
         .invoke_handler(tauri::generate_handler![
             get_app_state,
             set_download_directory,

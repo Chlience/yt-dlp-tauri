@@ -89,3 +89,36 @@ test("Cookie selection sends the chosen URL and displays the bound origin", asyn
   assert.equal(app.el("download").disabled, true);
   assert.equal(app.el("parse").disabled, false);
 });
+
+test("metadata parsing can be cancelled and retried", async () => {
+  const parse = deferred<typeof video>();
+  let attempts = 0;
+  const app = await createApp({
+    parse_metadata: () => ++attempts === 1 ? parse.promise : video,
+    cancel_download: () => parse.reject("Operation cancelled."),
+  });
+  app.input(video.webpage_url);
+  await app.click("parse");
+  assert.equal(app.el("cancel").disabled, false);
+  await app.click("cancel");
+  assert.equal(app.el("parse").disabled, false);
+  assert.equal(app.el("download").disabled, true);
+  assert.equal(app.el("progress-text").textContent, "Metadata parsing cancelled");
+  await app.click("parse");
+  assert.equal(app.el("download").disabled, false);
+});
+
+test("cancelling during download preparation restores the controls", async () => {
+  const download = deferred<string>();
+  const app = await createApp({
+    download_video: () => download.promise,
+    cancel_download: () => download.reject("Operation cancelled."),
+  });
+  app.input(video.webpage_url);
+  await app.click("parse");
+  await app.click("download");
+  await app.click("cancel");
+  assert.equal(app.el("download").disabled, false);
+  assert.equal(app.el("cancel").disabled, true);
+  assert.equal(app.el("progress-text").textContent, "Download cancelled");
+});

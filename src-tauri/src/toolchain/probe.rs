@@ -3,16 +3,13 @@ use super::{
     ToolStatus,
 };
 use std::{
-    ffi::OsStr,
     fs,
     path::Path,
-    process::{Command, Output, Stdio},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    process::{Command, Output},
+    sync::atomic::AtomicBool,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMBINATION_PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -49,7 +46,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
 
     let result = (|| {
         let media_path = work_root.join("probe.mp4");
-        let mut ffmpeg = background_command(&paths.ffmpeg);
+        let mut ffmpeg = Command::new(&paths.ffmpeg);
         ffmpeg.args([
             "-hide_banner",
             "-loglevel",
@@ -69,7 +66,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
         ffmpeg.arg(&media_path);
         run_bounded_probe(&mut ffmpeg, "FFmpeg local media probe")?;
 
-        let mut ffprobe = background_command(&paths.ffprobe);
+        let mut ffprobe = Command::new(&paths.ffprobe);
         ffprobe.args([
             "-v",
             "error",
@@ -95,7 +92,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
                 media_path.display()
             )
         })?;
-        let mut yt_dlp = background_command(&paths.yt_dlp);
+        let mut yt_dlp = Command::new(&paths.yt_dlp);
         yt_dlp.args([
             "--ignore-config",
             "--no-playlist",
@@ -135,41 +132,30 @@ fn run_bounded_probe_with_timeout(
     label: &str,
     timeout: Duration,
 ) -> Result<Output, String> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("Failed to start {label}: {error}"))?;
-    let started = Instant::now();
-    loop {
-        match child
-            .try_wait()
-            .map_err(|error| format!("Failed to poll {label}: {error}"))?
-        {
-            Some(_) => {
-                let output = child
-                    .wait_with_output()
-                    .map_err(|error| format!("Failed to collect {label} output: {error}"))?;
-                if output.status.success() {
-                    return Ok(output);
-                }
-                return Err(process_failure_message(
-                    label,
-                    output.status.code(),
-                    &output.stderr,
-                    &output.stdout,
-                ));
-            }
-            None if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "{label} timed out after {} seconds",
-                    timeout.as_secs()
-                ));
-            }
-            None => thread::sleep(Duration::from_millis(50)),
-        }
+    let mut stdout = Vec::new();
+    let output = crate::process::run(
+        command,
+        label,
+        Some(timeout),
+        &AtomicBool::new(false),
+        |line| {
+            stdout.extend_from_slice(line.as_bytes());
+            stdout.push(b'\n');
+        },
+    )?;
+    if !output.status.success() {
+        return Err(process_failure_message(
+            label,
+            output.status.code(),
+            &output.stderr,
+            &stdout,
+        ));
     }
+    Ok(Output {
+        status: output.status,
+        stdout,
+        stderr: output.stderr,
+    })
 }
 
 fn unique_nonce() -> u128 {
@@ -238,7 +224,7 @@ fn probe_tool(
         }
     }
 
-    let mut command = background_command(full_path);
+    let mut command = Command::new(full_path);
     command.args(version_args);
     let label = format!("{name} version probe at {}", full_path.display());
     match run_bounded_probe_with_timeout(&mut command, &label, VERSION_PROBE_TIMEOUT) {
@@ -252,17 +238,6 @@ fn probe_tool(
         },
     }
     status
-}
-
-fn background_command(program: impl AsRef<OsStr>) -> Command {
-    #[allow(unused_mut)]
-    let mut command = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
 }
 
 fn first_line(bytes: &[u8]) -> Option<String> {

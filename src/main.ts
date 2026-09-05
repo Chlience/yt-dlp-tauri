@@ -126,6 +126,9 @@ const translations = {
     "cookies.label": "Cookie file",
     "cookies.none": "No cookies",
     "cookies.chooseFile": "Choose Cookie file",
+    "progress.metadataCancelled": "Metadata parsing cancelled.",
+    "notice.metadataCancelled": "Metadata parsing cancelled.",
+    "event.metadataCancelled": "Metadata parsing cancelled.",
     "preview.thumbnailAlt": "video thumbnail",
     "preview.emptyImage": "Preview",
     "preview.label": "Preview",
@@ -147,7 +150,7 @@ const translations = {
     "progress.completedOpenFolder": "Download completed. Open the folder to view the file.",
     "progress.downloadCancelled": "Download cancelled.",
     "progress.downloadFailed": "Download failed.",
-    "progress.cancelling": "Cancelling download...",
+    "progress.cancelling": "Cancelling...",
     "progress.eta": "ETA",
     "notice.checkingTools": "Checking tools...",
     "notice.toolchainReady": "Toolchain ready.",
@@ -293,6 +296,9 @@ const translations = {
     "cookies.label": "Cookie 文件",
     "cookies.none": "未使用 Cookie",
     "cookies.chooseFile": "选择 Cookie 文件",
+    "progress.metadataCancelled": "视频解析已取消。",
+    "notice.metadataCancelled": "视频解析已取消。",
+    "event.metadataCancelled": "视频解析已取消。",
     "preview.thumbnailAlt": "视频缩略图",
     "preview.emptyImage": "预览",
     "preview.label": "预览",
@@ -314,7 +320,7 @@ const translations = {
     "progress.completedOpenFolder": "下载完成。打开目录即可查看文件。",
     "progress.downloadCancelled": "下载已取消。",
     "progress.downloadFailed": "下载失败。",
-    "progress.cancelling": "正在取消下载...",
+    "progress.cancelling": "正在取消...",
     "progress.eta": "剩余",
     "notice.checkingTools": "正在检查工具链...",
     "notice.toolchainReady": "工具链已就绪。",
@@ -703,7 +709,7 @@ function renderReleaseNotes() {
 function bindEvents() {
   elements.parse.addEventListener("click", () => void parseCurrentUrl());
   elements.download.addEventListener("click", () => void downloadCurrentVideo());
-  elements.cancel.addEventListener("click", () => void cancelCurrentDownload());
+  elements.cancel.addEventListener("click", () => void cancelCurrentOperation());
   elements.chooseCookies.addEventListener("click", () => void chooseCookiesFile());
   elements.clearCookies.addEventListener("click", () => void clearCookiesFile());
   elements.settingsToggle.addEventListener("click", () => setSettingsOpen(true));
@@ -1090,6 +1096,13 @@ async function parseCurrentUrl() {
       elements.progressText.textContent = t("progress.idle");
       return;
     }
+    if (error === "Operation cancelled.") {
+      invalidateParsedVideo(t("progress.metadataCancelled"));
+      elements.progressText.textContent = t("progress.metadataCancelled");
+      showNotice(t("notice.metadataCancelled"), "warning");
+      logEvent(t("event.metadataCancelled"));
+      return;
+    }
     invalidateParsedVideo(t("preview.parseFailed"));
     elements.progressText.textContent = t("progress.metadataFailed");
     showNotice(String(error), "error");
@@ -1124,7 +1137,7 @@ async function downloadCurrentVideo() {
   } catch (error) {
     const message = String(error);
     elements.progress.value = 0;
-    if (message.toLowerCase().includes("cancel")) {
+    if (message === "Operation cancelled.") {
       elements.progressText.textContent = t("progress.downloadCancelled");
       showNotice(t("notice.downloadCancelled"), "warning");
       logEvent(t("event.downloadCancelled"));
@@ -1138,8 +1151,8 @@ async function downloadCurrentVideo() {
   }
 }
 
-async function cancelCurrentDownload() {
-  if (state.activeOperation !== "download" || state.cancelRequested) {
+async function cancelCurrentOperation() {
+  if ((state.activeOperation !== "download" && state.activeOperation !== "metadata") || state.cancelRequested) {
     return;
   }
 
@@ -1596,7 +1609,7 @@ function updateButtons() {
   const hasUrl = elements.url.value.trim().length > 0;
   elements.parse.disabled = state.busy || !hasUrl || !state.toolsReady;
   elements.download.disabled = state.busy || !state.metadata || !state.selectedFormat || !state.toolsReady;
-  elements.cancel.disabled = state.activeOperation !== "download" || state.cancelRequested;
+  elements.cancel.disabled = (state.activeOperation !== "download" && state.activeOperation !== "metadata") || state.cancelRequested;
   elements.chooseCookies.disabled = state.busy;
   elements.clearCookies.disabled = state.busy || !state.cookiesFile;
   elements.toolSourceManaged.disabled = state.busy;
