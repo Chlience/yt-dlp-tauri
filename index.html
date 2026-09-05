@@ -611,6 +611,28 @@
                   A failed request does not block other requests
                 </p>
               </section>
+              <section class="settings-section" aria-labelledby="proxy-heading">
+                <div class="setting-row">
+                  <h3 id="proxy-heading" data-i18n="proxy.label">Network proxy</h3>
+                  <label for="proxy-mode" data-i18n="proxy.mode">Mode</label>
+                  <select id="proxy-mode">
+                    <option value="system" data-i18n="proxy.system">System / environment</option>
+                    <option value="direct" data-i18n="proxy.direct">Direct connection</option>
+                    <option value="custom" data-i18n="proxy.custom">Custom proxy</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="proxy-url" data-i18n="proxy.address">Proxy address</label>
+                  <div class="setting-row">
+                    <input id="proxy-url" type="url" placeholder="http://127.0.0.1:7890" spellcheck="false" autocomplete="off" aria-describedby="proxy-hint" disabled />
+                    <button id="save-proxy" class="button secondary compact" type="button" data-i18n="action.save">Save</button>
+                  </div>
+                  <div>
+                    <p id="proxy-hint" class="field-hint" data-i18n="proxy.hint">HTTP, HTTPS and SOCKS proxies are supported. Use socks5h for proxy-side DNS.</p>
+                    <p class="field-hint" data-i18n="proxy.scope">Used for video and playlist parsing and downloads. New requests and retries use the saved setting; queued requests keep their original setting.</p>
+                  </div>
+                </div>
+              </section>
               <section class="settings-section">
                 <div class="setting-row">
                   <h3 data-i18n="language.label">Language</h3>

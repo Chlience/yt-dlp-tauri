@@ -7,6 +7,12 @@ export type AppState = {
   local_toolchain_paths: LocalToolchainPaths;
   cookies_file?: string | null;
   cookies_origin?: string | null;
+  proxy?: ProxyConfig;
+};
+
+export type ProxyConfig = {
+  mode: "system" | "direct" | "custom";
+  url?: string | null;
 };
 
 export type ToolchainSource = "managed" | "local";

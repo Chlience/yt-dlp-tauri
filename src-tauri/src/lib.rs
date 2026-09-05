@@ -15,6 +15,7 @@ mod cookies;
 mod downloads;
 mod playlist;
 mod process;
+mod proxy;
 mod queue;
 use cookies::PreparedCookiesFile;
 use downloads::{DownloadInput, DownloadJob};
@@ -58,6 +59,7 @@ struct AppState {
     local_toolchain_paths: LocalToolchainPaths,
     cookies_file: Option<String>,
     cookies_origin: Option<String>,
+    proxy: proxy::ProxyConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -165,6 +167,13 @@ async fn reset_download_directory() -> Result<AppState, String> {
     })
     .await
     .map_err(to_string)?
+}
+
+#[tauri::command]
+async fn set_proxy_config(config: proxy::ProxyConfig) -> Result<proxy::ProxyConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || proxy::save(&state_directory()?, config))
+        .await
+        .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -399,9 +408,11 @@ async fn parse_metadata(
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
         let cookies_file = prepared_cookies_file_for_url(&url)?;
+        let proxy = proxy::read(&state_directory()?)?;
         append_log("metadata", &format!("Parsing {url}"));
 
         let mut command = Command::new(&tools.yt_dlp);
+        proxy.configure(&mut command);
         command
             .args([
                 "--ignore-config",
@@ -431,12 +442,12 @@ async fn parse_metadata(
 
         if !output.status.success() {
             append_log("metadata", "Failed to parse metadata.");
-            return Err(process_failure_message(
+            return Err(proxy.redact_error(process_failure_message(
                 "Failed to parse video metadata.",
                 output.status.code(),
                 &output.stderr,
                 json.as_bytes(),
-            ));
+            )));
         }
 
         parse_metadata_json(&json, &url)
@@ -464,7 +475,9 @@ async fn parse_playlist_page(
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
         let cookies = prepared_cookies_file_for_url(&url)?;
+        let proxy = proxy::read(&state_directory()?)?;
         let mut command = Command::new(&tools.yt_dlp);
+        proxy.configure(&mut command);
         command
             .args([
                 "--ignore-config",
@@ -501,7 +514,7 @@ async fn parse_playlist_page(
             )),
             Err(error) => Some(error),
         };
-        Ok(reader.finish(error))
+        Ok(reader.finish(error.map(|message| proxy.redact_error(message))))
     })
     .await
     .map_err(to_string)?
@@ -527,9 +540,18 @@ async fn enqueue_downloads(
         require_tools(&tools)?;
         let directory = download_directory()?;
         let cookies = cookies::read_selection(&state_directory()?)?;
+        let proxy = proxy::read(&state_directory()?)?;
         let jobs = requests
             .into_iter()
-            .map(|input| DownloadJob::new(input, directory.clone(), tools.clone(), cookies.clone()))
+            .map(|input| {
+                DownloadJob::new(
+                    input,
+                    directory.clone(),
+                    tools.clone(),
+                    cookies.clone(),
+                    proxy.clone(),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         queue.enqueue(jobs)
     })
@@ -560,6 +582,7 @@ async fn retry_request(
         job.tools = locate_tools(&app)?;
         require_tools(&job.tools)?;
         job.cookies = cookies::read_selection(&state_directory()?)?;
+        job.proxy = proxy::read(&state_directory()?)?;
         queue.retry(&id, job)
     })
     .await
@@ -1284,6 +1307,7 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
             .as_ref()
             .map(|selection| selection.path.display().to_string()),
         cookies_origin: cookies.and_then(|selection| selection.origin),
+        proxy: proxy::read(&state_directory()?)?,
     })
 }
 
@@ -1571,6 +1595,7 @@ pub fn run() {
             get_app_state,
             set_download_directory,
             reset_download_directory,
+            set_proxy_config,
             set_cookies_file,
             clear_cookies_file,
             open_download_directory,

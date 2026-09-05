@@ -1,3 +1,5 @@
+import type { ProxyConfig } from "./app-state";
+
 export type DownloadInput = {
   url: string;
   title: string;
@@ -25,6 +27,7 @@ export type DownloadItem = {
   filename: string;
   cookie_origin?: string;
   cookie_file?: string;
+  proxy?: ProxyConfig;
   progress?: { percent?: number; status: string; speed?: string; eta?: string };
   output_path?: string;
   error?: string;

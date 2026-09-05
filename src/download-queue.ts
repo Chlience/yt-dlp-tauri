@@ -50,6 +50,12 @@ export function createDownloadQueue(t: Translate, changed: () => void) {
       [t("download.saveTo"), item.directory],
       [t("queue.filename"), item.output_path || item.filename],
       [
+        t("proxy.label"),
+        item.proxy?.mode === "custom"
+          ? item.proxy.url || t("proxy.custom")
+          : t(item.proxy?.mode === "direct" ? "proxy.direct" : "proxy.system"),
+      ],
+      [
         t("cookies.label"),
         item.cookie_file
           ? `${item.cookie_file} · ${item.cookie_origin || t("queue.cookieDomains")}`

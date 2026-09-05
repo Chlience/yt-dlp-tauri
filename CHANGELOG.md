@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### 中文
 
+- 新增网络代理设置：系统／环境代理、直接连接和自定义 HTTP(S)／SOCKS 代理，用于视频／播放列表解析及下载；配置持久保存，已入队请求保留原配置，重试读取最新配置。
 - 通知在页面底部独立显示，多条通知和长错误可滚动查看，保留解析与下载操作空间；请求详情支持 Esc 关闭并恢复键盘焦点。
 - 新版界面分为新建下载、下载队列和设置，保留中英文切换及工具管理能力。
 - 支持播放列表和分集的分页解析、全选已加载条目、反选与序号范围选择；加载中断后保留已有结果并可继续加载。
@@ -22,6 +23,7 @@ All notable changes to this project will be documented in this file.
 
 ### English
 
+- Add persistent network proxy settings for video/playlist parsing and downloads: system/environment, direct, and custom HTTP(S)/SOCKS proxies. Queued requests keep their captured setting; retries use the current setting.
 - Reserve a scrollable notification area below page content so stacked notices and long errors keep download controls accessible; close request details with Escape and restore keyboard focus.
 - Introduce separate New download, Download queue, and Settings pages while retaining bilingual UI and tool management.
 - Parse playlists and episodes in pages, select loaded items, invert selections, and choose item-number ranges; preserve partial results and resume loading after interruption.

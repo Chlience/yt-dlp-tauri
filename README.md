@@ -45,6 +45,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Choose video with audio or audio-only output; playlist video quality is a resolution limit applied to each request.
 - Show configuration errors during startup and retry initialization after the reported problem is corrected.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
+- Configure system/environment, direct, or custom HTTP(S)/SOCKS proxy connections for media parsing and downloads.
 - Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
 - Switch between the app-managed toolchain and trusted local tools discovered from `PATH` or selected by absolute path.
 - Resolve the stable toolchain from project-controlled immutable GitHub Release assets.
@@ -118,7 +119,7 @@ The queue and its 1–3 concurrency setting last for the current app session; th
 
 Playlist downloads use a subfolder named after the playlist and filenames such as `03 - Title [video-id].mp4`. Original numbers are preserved. Unsupported filename characters are replaced, long components are bounded, and output extensions depend on the source and selected mode. Requests targeting the same base filename run serially and existing outputs are not overwritten. Retrying an interrupted download can reuse partial files supported by yt-dlp.
 
-Retry preserves the request's URL, format and destination and uses the **current** toolchain and Cookie selection. Changing the default folder or Cookie selection affects future requests; waiting requests keep the selection captured when added. Each running tool receives a private Cookie copy; the selected source file is read at startup of that operation and is not modified. Tool installation, replacement and source changes are blocked while requests remain unfinished.
+Retry preserves the request's URL, format and destination and uses the **current** toolchain, Cookie selection and proxy setting. Changing the default folder, Cookie selection or proxy affects future requests; waiting requests keep the selection captured when added. Each running tool receives a private Cookie copy; the selected source file is read at startup of that operation and is not modified. Tool installation, replacement and source changes are blocked while requests remain unfinished.
 
 ## Configuration
 
@@ -131,6 +132,7 @@ Retry preserves the request's URL, format and destination and uses the **current
 | `src-tauri/tauri.conf.json` | Tauri app metadata, fixed window size, bundle target, icons, and resources. |
 | `scripts/download-tools.ps1` | Optional development script that restores the pinned `win-x64` toolchain into the checkout. |
 | Settings: output folder | User-facing download directory selection, save, reset, and open actions. |
+| Settings: network proxy | Saved proxy selection for video/playlist parsing and downloads. |
 | Settings: GitHub site | `Direct` or `gh-proxy` mode for update checks and release links. Project home always opens GitHub directly. |
 | Settings: tool source | Switch between the verified app-managed revision and trusted local executables. |
 
@@ -138,6 +140,18 @@ Current release scope:
 
 - Supported tool target: `win-x64`.
 - Tool binaries are not committed to the repository.
+
+## Network proxy
+
+In **Settings → General → Network proxy**, choose a mode and click **Save**:
+
+- **System / environment** (default): keep yt-dlp's own proxy detection, including proxy environment variables. Detection depends on the selected yt-dlp build and operating system; automatic PAC configuration is not guaranteed.
+- **Direct connection**: explicitly bypass proxies for yt-dlp media requests.
+- **Custom proxy**: enter a complete address such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. Supported schemes are `http`, `https`, `socks4`, `socks4a`, `socks5`, and `socks5h`; SOCKS addresses require a port. Use `socks5h` to resolve destination names at the proxy. HTTPS proxy support depends on the selected yt-dlp build.
+
+The setting applies to subsequent video/playlist parsing, new download requests and retries. Queued and running requests retain their captured setting. Request details show that setting with URL credentials removed. GitHub update/release routing and WebView thumbnail requests use their existing network settings.
+
+Settings persist in `%LOCALAPPDATA%\yt-dlp-tauri\state\proxy.json`. Proxy URLs may include `username:password@host`; credentials are stored locally in plain text and passed to the selected yt-dlp executable. URL credentials are removed from queue summaries and proxy error URLs. Invalid addresses are rejected without replacing the saved configuration.
 
 ## Cookie files
 

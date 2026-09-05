@@ -1,6 +1,7 @@
 use crate::{
     downloads::{DownloadInput, DownloadJob},
     process::{ProcessState, Task},
+    proxy::ProxyConfig,
     DownloadProgress,
 };
 use serde::Serialize;
@@ -62,6 +63,7 @@ mod tests {
                 deno: "/tools/deno".into(),
             },
             None,
+            ProxyConfig::default(),
         )
         .unwrap()
     }
@@ -191,6 +193,49 @@ mod tests {
     }
 
     #[test]
+    fn queued_jobs_keep_their_proxy_and_retry_replaces_only_the_selected_jobs_proxy() {
+        let test = Harness::new();
+        test.queue.set_options(1, true).unwrap();
+        let mut original = job("one");
+        original.proxy = ProxyConfig {
+            mode: crate::proxy::ProxyMode::Custom,
+            url: Some("http://user:secret@localhost:7890".into()),
+        }
+        .validate()
+        .unwrap();
+        test.queue
+            .enqueue(vec![original.clone(), job("two")])
+            .unwrap();
+        let serialized = serde_json::to_string(&test.queue.snapshot().unwrap()).unwrap();
+        assert!(!serialized.contains("secret"));
+        assert!(!serialized.contains("user:"));
+        assert_eq!(test.queue.job("request-1").unwrap().proxy, original.proxy);
+        test.queue.cancel("request-1").unwrap();
+        let mut retry = test.queue.job("request-1").unwrap();
+        retry.proxy = ProxyConfig {
+            mode: crate::proxy::ProxyMode::Direct,
+            url: None,
+        };
+        test.queue.retry("request-1", retry).unwrap();
+        assert_eq!(
+            test.queue.item("request-1").unwrap().proxy.mode,
+            crate::proxy::ProxyMode::Direct
+        );
+        assert_eq!(
+            test.queue.job("request-1").unwrap().input.url,
+            original.input.url
+        );
+        assert_eq!(
+            test.queue.job("request-1").unwrap().directory,
+            original.directory
+        );
+        assert_eq!(
+            test.queue.job("request-2").unwrap().proxy,
+            ProxyConfig::default()
+        );
+    }
+
+    #[test]
     fn stopping_new_requests_keeps_running_work_and_waiting_cancellation_never_starts() {
         let test = Harness::new();
         test.queue
@@ -260,6 +305,7 @@ pub(crate) struct DownloadItem {
     pub directory: String,
     pub filename: String,
     pub cookie_origin: Option<String>,
+    pub proxy: ProxyConfig,
     pub cookie_file: Option<String>,
     pub progress: Option<DownloadProgress>,
     pub output_path: Option<String>,
@@ -387,6 +433,7 @@ impl QueueState {
                         .cookies
                         .as_ref()
                         .and_then(|cookie| cookie.origin.clone()),
+                    proxy: job.proxy.summary(),
                     progress: None,
                     output_path: None,
                     error: None,
@@ -489,6 +536,7 @@ impl QueueState {
             .cookies
             .as_ref()
             .map(|cookie| cookie.path.display().to_string());
+        entry.item.proxy = job.proxy.summary();
         entry.job = Arc::new(job);
         self.changed(&mut queue, &[id.to_string()]);
         drop(queue);

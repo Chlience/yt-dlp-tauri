@@ -3,6 +3,7 @@ use crate::{
     parse_progress_line,
     process::Task,
     process_failure_message,
+    proxy::ProxyConfig,
     toolchain::ToolPaths,
     yt_dlp_cookie_args, DownloadProgress, OUTPUT_PATH_PREFIX, PROGRESS_PREFIX,
 };
@@ -42,6 +43,7 @@ pub(crate) struct DownloadJob {
     pub output_key: String,
     pub tools: ToolPaths,
     pub cookies: Option<CookieSelection>,
+    pub proxy: ProxyConfig,
 }
 
 impl DownloadJob {
@@ -50,6 +52,7 @@ impl DownloadJob {
         root: PathBuf,
         tools: ToolPaths,
         cookies: Option<CookieSelection>,
+        proxy: ProxyConfig,
     ) -> Result<Self, String> {
         cookies::http_url(&input.url)?;
         if input.title.trim().is_empty() {
@@ -84,11 +87,13 @@ impl DownloadJob {
             output_key,
             tools,
             cookies,
+            proxy,
         })
     }
 
     fn command(&self, cookies_file: Option<&std::path::Path>) -> Command {
         let mut command = Command::new(&self.tools.yt_dlp);
+        self.proxy.configure(&mut command);
         let selector = if self.input.format_selector.trim().is_empty() {
             "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b"
         } else {
@@ -150,12 +155,12 @@ impl DownloadJob {
             }
         })?;
         if !output.status.success() {
-            return Err(process_failure_message(
+            return Err(self.proxy.redact_error(process_failure_message(
                 "Download failed.",
                 output.status.code(),
                 &output.stderr,
                 &[],
-            ));
+            )));
         }
         Ok(saved_path)
     }
@@ -278,6 +283,7 @@ mod tests {
                 deno: "/tools/deno".into(),
             },
             None,
+            ProxyConfig::default(),
         )
         .unwrap()
     }
@@ -336,6 +342,25 @@ mod tests {
         assert!(args.iter().any(|arg| arg.contains("100%%")));
         assert_eq!(args.last().unwrap(), "https://video.example/watch/3");
         assert_eq!(args[args.len() - 2], "--");
+    }
+
+    #[test]
+    fn download_command_applies_the_captured_proxy_before_the_url_terminator() {
+        let mut job = job(None);
+        job.proxy = ProxyConfig {
+            mode: crate::proxy::ProxyMode::Custom,
+            url: Some("socks5h://localhost:1080".into()),
+        }
+        .validate()
+        .unwrap();
+        let command = job.command(None);
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy())
+            .collect();
+        assert_eq!(&args[..2], ["--proxy", "socks5h://localhost:1080"]);
+        assert_eq!(args[args.len() - 2], "--");
+        assert_eq!(args.last().unwrap(), &job.input.url);
     }
 
     #[test]

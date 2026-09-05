@@ -13,6 +13,7 @@ import type {
   LocalToolchainConfig,
   LocalToolchainPaths,
   ToolchainSource,
+  ProxyConfig,
 } from "./app-state";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -166,6 +167,9 @@ const elements = {
   githubLink: must<HTMLButtonElement>("#github-link"),
   githubDirect: must<HTMLButtonElement>("#github-direct"),
   githubProxy: must<HTMLButtonElement>("#github-proxy"),
+  proxyMode: must<HTMLSelectElement>("#proxy-mode"),
+  proxyUrl: must<HTMLInputElement>("#proxy-url"),
+  saveProxy: must<HTMLButtonElement>("#save-proxy"),
   releaseNotesBackdrop: must<HTMLElement>("#release-notes-backdrop"),
   releaseNotesDialog: must<HTMLElement>("#release-notes-dialog"),
   releaseNotesClose: must<HTMLButtonElement>("#release-notes-close"),
@@ -519,6 +523,8 @@ function bindEvents() {
   elements.githubProxy.addEventListener("click", () =>
     setGithubAccessMode("gh-proxy"),
   );
+  elements.proxyMode.addEventListener("change", updateButtons);
+  elements.saveProxy.addEventListener("click", () => void saveProxyConfig());
   elements.thumbnail.addEventListener("load", () => showLoadedThumbnail());
   elements.thumbnail.addEventListener("error", () =>
     loadNextThumbnailCandidate(),
@@ -628,6 +634,8 @@ async function loadAppState() {
 }
 
 function applyAppState(appState: AppState) {
+  elements.proxyMode.value = appState.proxy?.mode ?? "system";
+  elements.proxyUrl.value = appState.proxy?.url ?? "";
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
   elements.homeDirectory.textContent = appState.download_directory;
@@ -960,6 +968,26 @@ async function saveDownloadFolder() {
   }
 }
 
+async function saveProxyConfig() {
+  if (state.busy || !state.initialized || enqueueing) return;
+  const mode = elements.proxyMode.value as ProxyConfig["mode"];
+  const config: ProxyConfig = {
+    mode,
+    url: mode === "custom" ? elements.proxyUrl.value.trim() : null,
+  };
+  setBusy(true);
+  try {
+    const saved = await invoke<ProxyConfig>("set_proxy_config", { config });
+    elements.proxyMode.value = saved.mode;
+    elements.proxyUrl.value = saved.url ?? "";
+    showNotice(t("proxy.saved"), "success");
+  } catch (error) {
+    showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function resetDownloadFolder() {
   try {
     const appState = await invoke<AppState>("reset_download_directory");
@@ -1217,6 +1245,10 @@ function updateButtons() {
   elements.browseFolder.disabled = configurationUnavailable;
   elements.saveFolder.disabled = configurationUnavailable;
   elements.resetFolder.disabled = configurationUnavailable;
+  elements.proxyMode.disabled = configurationUnavailable || enqueueing;
+  elements.proxyUrl.disabled =
+    configurationUnavailable || enqueueing || elements.proxyMode.value !== "custom";
+  elements.saveProxy.disabled = configurationUnavailable || enqueueing;
   elements.checkUpdates.disabled = state.updateChecking;
   elements.githubDirect.disabled = state.updateChecking;
   elements.githubProxy.disabled = state.updateChecking;
