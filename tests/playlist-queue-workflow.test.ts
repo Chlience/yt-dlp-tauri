@@ -205,3 +205,64 @@ test("pending queue options prevent a second change from sending stale pause sta
   assert.equal(app.el("queue-pause").textContent, "Resume starting requests");
   assert.equal(app.el("queue-concurrency").value, "1");
 });
+
+for (const close of ["button", "Escape"] as const) {
+  test(`closing request details with ${close} restores focus after the request status changes`, async () => {
+    const app = await createApp();
+    app.input(video.webpage_url);
+    await app.click("parse");
+    await app.click("download");
+    const originalTitle = app.el("queue-list").querySelector(".request-title")!;
+    originalTitle.dispatch("click");
+    assert.equal(app.el("request-detail").hidden, false);
+    assert.equal(app.focused, app.el("request-detail-close"));
+
+    app.emit("queue-changed", {
+      revision: 2,
+      concurrency: 1,
+      paused: false,
+      requests: [{
+        id: "request-1",
+        revision: 2,
+        request: { title: video.title, url: video.webpage_url, label: "Best MP4" },
+        status: "running",
+        directory: "/downloads",
+        filename: video.title,
+      }],
+    });
+    const currentTitle = app.el("queue-list").querySelector(".request-title")!;
+    if (close === "button") await app.click("request-detail-close");
+    else await app.key("Escape");
+    assert.equal(app.el("request-detail").hidden, true);
+    assert.equal(app.focused, currentTitle);
+  });
+}
+
+test("closing details of a filtered request moves focus to the queue filter", async () => {
+  const app = await createApp();
+  app.input(video.webpage_url);
+  await app.click("parse");
+  await app.click("download");
+  app.el("queue-list").querySelector(".request-title")!.dispatch("click");
+  app.el("queue-filter").value = "completed";
+  app.el("queue-filter").dispatch("change");
+  await app.key("Escape");
+  assert.equal(app.el("request-detail").hidden, true);
+  assert.equal(app.focused, app.el("queue-filter"));
+});
+
+test("Escape on another page preserves the queue details until the user returns", async () => {
+  const app = await createApp();
+  app.input(video.webpage_url);
+  await app.click("parse");
+  await app.click("download");
+  const title = app.el("queue-list").querySelector(".request-title")!;
+  title.dispatch("click");
+  await app.click("settings-toggle");
+  await app.key("Escape");
+  assert.equal(app.el("queue-view").hidden, false);
+  assert.equal(app.el("request-detail").hidden, false);
+  await app.key("Escape");
+  assert.equal(app.el("request-detail").hidden, true);
+  assert.equal(app.focused, title);
+});

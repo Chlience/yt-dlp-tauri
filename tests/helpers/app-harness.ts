@@ -5,6 +5,11 @@ import ts from "typescript";
 
 // Exercise the application through DOM events and IPC, without exporting its state for tests.
 class Element {
+  private readonly onFocus: (element: Element) => void;
+  constructor(onFocus: (element: Element) => void = () => {}) {
+    this.onFocus = onFocus;
+  }
+
   value = "";
   textContent = "";
   disabled = false;
@@ -43,12 +48,16 @@ class Element {
       }),
     );
   }
-  querySelector(selector: string) {
-    return (
-      this.children.find((child) =>
-        child.className.split(" ").includes(selector.slice(1)),
-      ) ?? null
-    );
+  querySelector(selector: string): Element | null {
+    for (const child of this.children) {
+      if (child.className.split(" ").includes(selector.slice(1))) return child;
+      const match = child.querySelector(selector);
+      if (match) return match;
+    }
+    return null;
+  }
+  contains(element: Element | null): boolean {
+    return this === element || this.children.some((child) => child.contains(element));
   }
   addEventListener(name: string, callback: (event: unknown) => void) {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), callback]);
@@ -82,7 +91,9 @@ class Element {
       );
     this.parent = null;
   }
-  focus() {}
+  focus() {
+    this.onFocus(this);
+  }
 }
 
 export const healthyTools = ["yt-dlp", "ffmpeg", "ffprobe", "deno"].map(
@@ -120,11 +131,13 @@ export const managedAppState = {
 
 type Handler = (args: any) => unknown;
 export async function createApp(handlers: Record<string, Handler> = {}) {
+  let activeElement: Element | null = null;
+  const createElement = () => new Element((element) => { activeElement = element; });
   const nodes = new Map<string, Element>();
   for (const match of readFileSync("index.html", "utf8").matchAll(
     /\bid="([^"]+)"/gu,
   )) {
-    nodes.set(`#${match[1]}`, new Element());
+    nodes.set(`#${match[1]}`, createElement());
   }
   let queue = {
     revision: 0,
@@ -189,10 +202,10 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
     document: {
       querySelector: (selector: string) => nodes.get(selector) ?? null,
       querySelectorAll: () => [],
-      createElement: () => new Element(),
+      createElement,
       documentElement: {},
-      body: new Element(),
-      activeElement: null,
+      body: createElement(),
+      get activeElement() { return activeElement; },
     },
     window: {
       addEventListener: (name: string, callback: (event: unknown) => void) =>
@@ -240,6 +253,11 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
   await flush();
   return {
     calls,
+    get focused() { return activeElement; },
+    async key(key: string) {
+      listeners.get("keydown")?.({ key, preventDefault() {} });
+      await flush();
+    },
     emit(name: string, payload: unknown) {
       ipcEvents.get(name)?.({ payload });
     },

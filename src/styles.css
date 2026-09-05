@@ -1108,31 +1108,32 @@ progress::-moz-progress-bar {
   background: var(--accent);
 }
 .toast-region {
-  position: fixed;
-  top: 76px;
-  right: 24px;
-  width: min(390px, calc(100vw - 48px));
+  flex: none;
+  max-height: 140px;
+  margin: 0 32px 12px;
+  overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  z-index: 20;
-  pointer-events: none;
+  gap: 8px;
+}
+.toast-region:empty {
+  display: none;
 }
 .toast {
   display: flex;
+  flex: none;
   align-items: flex-start;
   gap: 10px;
-  padding: 13px 14px;
+  padding: 10px 12px;
   background: white;
   border: 1px solid var(--line);
   border-radius: 8px;
-  box-shadow: 0 5px 22px #23382a14;
-  pointer-events: auto;
 }
 .toast-copy {
   font-size: 12px;
   overflow-wrap: anywhere;
   flex: 1;
+  min-width: 0;
 }
 .toast-indicator {
   height: 7px;
@@ -1158,6 +1159,7 @@ progress::-moz-progress-bar {
 }
 .toast.is-leaving {
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.18s;
 }
 .modal-backdrop {

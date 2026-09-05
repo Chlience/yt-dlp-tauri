@@ -84,6 +84,20 @@ export function createDownloadQueue(t: Translate, changed: () => void) {
     }
   }
 
+  function closeDetail(restoreFocus = true) {
+    if (selected === null) return false;
+    const row = rows.get(selected);
+    selected = null;
+    detail();
+    if (restoreFocus) {
+      const target = row && !row.hidden
+        ? row.querySelector<HTMLButtonElement>(".request-title")
+        : null;
+      (target ?? node("queue-filter")).focus();
+    }
+    return true;
+  }
+
   function renderRow(item: DownloadItem) {
     const row = rows.get(item.id) ?? document.createElement("article");
     const filter = node<HTMLSelectElement>("queue-filter").value;
@@ -249,7 +263,12 @@ export function createDownloadQueue(t: Translate, changed: () => void) {
       );
     node("queue-no-results").hidden = !noMatches;
     node("queue-content").hidden = noMatches;
-    detail(snapshot.requests.find((item) => item.id === selected));
+    const selectedItem = snapshot.requests.find((item) => item.id === selected);
+    if (selected !== null && !selectedItem) {
+      closeDetail(node("request-detail").contains(document.activeElement));
+    } else {
+      detail(selectedItem);
+    }
     changed();
   }
 
@@ -295,6 +314,7 @@ export function createDownloadQueue(t: Translate, changed: () => void) {
       return model.unfinished;
     },
     render,
+    closeDetail,
     async enqueue(requests: DownloadInput[]) {
       apply(await invoke<QueueSnapshot>("enqueue_downloads", { requests }));
     },
@@ -323,10 +343,7 @@ export function createDownloadQueue(t: Translate, changed: () => void) {
           "click",
           () => void command("clear_finished_requests"),
         );
-        node("request-detail-close").addEventListener("click", () => {
-          selected = null;
-          detail();
-        });
+        node("request-detail-close").addEventListener("click", () => closeDetail());
         node("queue-pause").addEventListener(
           "click",
           () =>

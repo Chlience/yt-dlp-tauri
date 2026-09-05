@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### 中文
 
+- 通知在页面底部独立显示，多条通知和长错误可滚动查看，保留解析与下载操作空间；请求详情支持 Esc 关闭并恢复键盘焦点。
 - 新版界面分为新建下载、下载队列和设置，保留中英文切换及工具管理能力。
 - 支持播放列表和分集的分页解析、全选已加载条目、反选与序号范围选择；加载中断后保留已有结果并可继续加载。
 - 每条选中视频作为独立下载请求，分别显示进度、取消、重试和打开输出；默认同时下载 1 条，可调整为 1–3 条，失败不阻塞后续请求。
@@ -21,6 +22,7 @@ All notable changes to this project will be documented in this file.
 
 ### English
 
+- Reserve a scrollable notification area below page content so stacked notices and long errors keep download controls accessible; close request details with Escape and restore keyboard focus.
 - Introduce separate New download, Download queue, and Settings pages while retaining bilingual UI and tool management.
 - Parse playlists and episodes in pages, select loaded items, invert selections, and choose item-number ranges; preserve partial results and resume loading after interruption.
 - Create an independent request for each selected video, with its own progress, cancel, retry, and output actions; run one request by default with a 1–3 concurrency setting, continuing after individual failures.

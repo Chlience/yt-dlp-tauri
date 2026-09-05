@@ -222,3 +222,15 @@ test("an enqueue failure keeps the parsed selection available for retry", async 
     /Output directory unavailable/u,
   );
 });
+
+test("successive Escape presses dismiss separate notices during their exit animations", async () => {
+  const app = await createApp({ parse_metadata: () => { throw new Error("Video unavailable"); } });
+  app.input(video.webpage_url);
+  await app.click("parse");
+  await app.click("parse");
+  const notices = app.el("toast-region").children;
+  assert.equal(notices.length, 2);
+  await app.key("Escape");
+  await app.key("Escape");
+  assert.ok(notices.every((notice) => notice.classList.contains("is-leaving")));
+});

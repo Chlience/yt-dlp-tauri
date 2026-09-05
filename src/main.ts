@@ -576,7 +576,14 @@ function bindEvents() {
       return;
     }
 
-    const latestToast = elements.toastRegion.firstElementChild;
+    if (navigation.current() === "queue" && queue.closeDetail()) {
+      event.preventDefault();
+      return;
+    }
+
+    const latestToast = Array.from(elements.toastRegion.children).find(
+      (toast) => !toast.classList.contains("is-leaving"),
+    );
     if (latestToast instanceof HTMLElement) {
       dismissToast(latestToast);
     }
@@ -1250,6 +1257,7 @@ function showNotice(message: string, tone: NoticeTone) {
 
   toast.append(indicator, copy, close);
   elements.toastRegion.prepend(toast);
+  elements.toastRegion.scrollTop = 0;
   trimToastStack();
   scheduleToastDismiss(toast, tone);
 }
