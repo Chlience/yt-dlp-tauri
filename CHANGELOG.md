@@ -7,10 +7,12 @@ All notable changes to this project will be documented in this file.
 ### 中文
 
 - 修复修改 URL 或重新解析失败后仍可使用旧下载状态的问题；工具更新提示不再禁用当前可用工具链。
+- 已激活工具链缺少可执行文件时仍可检查并重装；受管工具在版本探测前先校验 SHA-256。
 
 ### English
 
 - Discard stale video previews after URL changes or failed parsing, and keep the current working toolchain usable when an update is available.
+- Allow verification and reinstallation when an active toolchain is missing an executable, and verify managed executable hashes before running version probes.
 
 ## 0.1.13 - 2026-07-14
 

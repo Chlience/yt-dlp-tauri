@@ -19,12 +19,12 @@ pub mod toolchain;
 use toolchain::{
     activate_revision, active_tool_paths, build_tool_download_client, manifest_target,
     parse_channel_record, parse_local_toolchain_config, parse_manifest, probe_local_toolchain,
-    probe_target, promote_staged_toolchain, read_active_state, require_tools,
-    resolve_local_toolchain, revision_root, select_revision_manifest_asset, stage_target_revision,
+    probe_target, promote_staged_toolchain, read_active_manifest, read_active_state, require_tools,
+    resolve_local_toolchain, select_revision_manifest_asset, stage_target_revision,
     tool_names_for_target, tool_paths_for_root, tool_target_from, verify_channel_manifest,
     ActiveToolchainState, GitHubRelease, LocalToolchainConfig, ManifestTarget, ProgressReporter,
     StageTargetRevisionRequest, ToolInstallProgress, ToolPaths, ToolStatus, ToolchainSource,
-    ToolsManifest, REVISION_MANIFEST_FILE, TOOLS_DIRECTORY,
+    ToolsManifest, TOOLS_DIRECTORY,
 };
 
 const TOOLS_MANIFEST_FILE: &str = "tools-manifest.json";
@@ -955,15 +955,8 @@ fn read_current_manifest(app: &AppHandle) -> Result<ToolsManifest, String> {
 fn read_current_manifest_json(app: &AppHandle) -> Result<String, String> {
     let target = current_tool_target()?;
     let base = app_data_root()?;
-    if let Some(state) = read_active_state(&base, &target)? {
-        let _ = active_tool_paths(&base, &target)?;
-        let path = revision_root(&base, &target, &state.revision)?.join(REVISION_MANIFEST_FILE);
-        return fs::read_to_string(&path).map_err(|error| {
-            format!(
-                "Failed to read active toolchain manifest at {}: {error}",
-                path.display()
-            )
-        });
+    if let Some(json) = read_active_manifest(&base, &target)? {
+        return Ok(json);
     }
 
     let bundled_path = bundled_manifest_path(app)?;
