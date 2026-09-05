@@ -1,16 +1,43 @@
-import { translations, type Language, type TranslationKey } from "./translations";
-import type { AppState, LocalToolchainConfig, LocalToolchainPaths, ToolchainSource } from "./app-state";
+import { createDownloadQueue } from "./download-queue";
+import { createPlaylistSelection } from "./playlist-selection";
+import { linkScope, playlistQualities } from "./playlist-model";
+import type { DownloadInput } from "./download-model";
+import { createNavigation } from "./navigation";
+import {
+  translations,
+  type Language,
+  type TranslationKey,
+} from "./translations";
+import type {
+  AppState,
+  LocalToolchainConfig,
+  LocalToolchainPaths,
+  ToolchainSource,
+} from "./app-state";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import changelogMarkdown from "../CHANGELOG.md?raw";
 import packageInfo from "../package.json";
-import { releaseNotesForVersion, shouldShowReleaseNotes, stripTerminalSentencePunctuation } from "./release-notes";
+import {
+  releaseNotesForVersion,
+  shouldShowReleaseNotes,
+  stripTerminalSentencePunctuation,
+} from "./release-notes";
 import { thumbnailUrlCandidates } from "./thumbnail";
 import { type ToolAction } from "./toolchain";
-import { createToolchainSettings, type ToolInstallProgress } from "./toolchain-settings";
-import { type GithubAccessMode, getUpdateStatus, parseGithubHttpError, parseLatestRelease, resolveGithubUrl } from "./update-check";
+import {
+  createToolchainSettings,
+  type ToolInstallProgress,
+} from "./toolchain-settings";
+import {
+  type GithubAccessMode,
+  getUpdateStatus,
+  parseGithubHttpError,
+  parseLatestRelease,
+  resolveGithubUrl,
+} from "./update-check";
 
 type VideoFormatOption = {
   label: string;
@@ -22,6 +49,7 @@ type VideoFormatOption = {
 
 type VideoMetadata = {
   title: string;
+  is_playlist?: boolean;
   id?: string;
   webpage_url: string;
   thumbnail_url?: string;
@@ -31,20 +59,14 @@ type VideoMetadata = {
   format_options: VideoFormatOption[];
 };
 
-type DownloadProgress = {
-  percent?: number;
-  status: string;
-  speed?: string;
-  eta?: string;
-  raw?: string;
-};
-
 const APP_VERSION = packageInfo.version;
 const PROJECT_REPOSITORY_URL = "https://github.com/Chlience/yt-dlp-tauri";
 const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY_URL}/releases`;
-const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
+const LATEST_RELEASE_API_URL =
+  "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
 const GITHUB_ACCESS_STORAGE_KEY = "yt-dlp-tauri-github-access-mode";
-const RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY = "yt-dlp-tauri-release-notes-seen-version";
+const RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY =
+  "yt-dlp-tauri-release-notes-seen-version";
 const MAX_TOASTS = 4;
 const TOAST_AUTO_DISMISS_MS: Record<NoticeTone, number> = {
   success: 6000,
@@ -60,7 +82,7 @@ const state = {
   metadata: null as VideoMetadata | null,
   selectedFormat: null as VideoFormatOption | null,
   busy: false,
-  activeOperation: null as "metadata" | "download" | "tools" | null,
+  activeOperation: null as "metadata" | "tools" | null,
   cancelRequested: false,
   lastUrl: "",
   toolsReady: false,
@@ -81,7 +103,11 @@ const state = {
   pendingToolManifestJson: null as string | null,
   updateChecking: false,
   latestReleaseUrl: "",
-  updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
+  updateStatus: null as {
+    key: TranslationKey;
+    values: Record<string, string | number>;
+    tone: UpdateTone;
+  } | null,
   githubAccessMode: resolveInitialGithubAccessMode(),
   cookiesFile: null as string | null,
   cookiesOrigin: null as string | null,
@@ -105,8 +131,15 @@ const elements = {
   clearCookies: must<HTMLButtonElement>("#clear-cookies"),
   settingsToggle: must<HTMLButtonElement>("#settings-toggle"),
   settingsClose: must<HTMLButtonElement>("#settings-close"),
-  settingsBackdrop: must<HTMLElement>("#settings-backdrop"),
-  settingsDrawer: must<HTMLElement>("#settings-drawer"),
+  appShell: must<HTMLElement>("#app-shell"),
+  newView: must<HTMLElement>("#new-view"),
+  workspace: must<HTMLElement>("#download-workspace"),
+  operationStatus: must<HTMLElement>("#operation-status"),
+  toolsRequired: must<HTMLElement>("#tools-required"),
+  emptyHints: must<HTMLElement>("#empty-hints"),
+  homeDirectory: must<HTMLElement>("#home-directory"),
+  directoryPreview: must<HTMLElement>("#download-directory-preview"),
+  appToolStatus: must<HTMLElement>("#app-tool-status"),
   languageEn: must<HTMLButtonElement>("#language-en"),
   languageZh: must<HTMLButtonElement>("#language-zh"),
   verifyTools: must<HTMLButtonElement>("#verify-tools"),
@@ -161,21 +194,57 @@ const elements = {
   toastRegion: must<HTMLElement>("#toast-region"),
 };
 
+const navigation = createNavigation();
+const queue = createDownloadQueue(t, updateButtons);
+const playlist = createPlaylistSelection({
+  t,
+  busy: (value) =>
+    setBusy(
+      value,
+      value ? t("playlist.loading") : t("progress.idle"),
+      "metadata",
+    ),
+  changed: () => {
+    updateDownloadOptions();
+    updateButtons();
+  },
+  currentUrl: () => elements.url.value.trim(),
+});
+let queueInitialized = false;
+let enqueueing = false;
+let showingScope = false;
+
 const {
-  setToolchainSource, chooseLocalTool, autoDetectLocalTools, verifyTools,
-  installTools, checkToolUpdates, reinstallTools, renderToolchainRevision,
-  renderToolchainSource, renderLocalToolchainPaths, updateToolActionButton,
+  setToolchainSource,
+  chooseLocalTool,
+  autoDetectLocalTools,
+  verifyTools,
+  installTools,
+  checkToolUpdates,
+  reinstallTools,
+  renderToolchainRevision,
+  renderToolchainSource,
+  renderLocalToolchainPaths,
+  updateToolActionButton,
   updateToolInstallProgress,
 } = createToolchainSettings({
-  state, elements, t, setBusy, applyAppState, loadAppState,
-  invalidateParsedVideo, showNotice, logEvent,
+  state,
+  elements,
+  t,
+  setBusy,
+  applyAppState,
+  loadAppState,
+  invalidateParsedVideo,
+  showNotice,
+  logEvent,
 });
 
 window.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   applyTranslations();
-  listen<DownloadProgress>("download-progress", (event) => updateDownloadProgress(event.payload));
-  listen<ToolInstallProgress>("tool-install-progress", (event) => updateToolInstallProgress(event.payload));
+  listen<ToolInstallProgress>("tool-install-progress", (event) =>
+    updateToolInstallProgress(event.payload),
+  );
   void bootstrap();
 });
 
@@ -218,34 +287,51 @@ function applyTranslations() {
     }
   });
 
-  document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-i18n-placeholder]").forEach((element) => {
-    const key = element.dataset.i18nPlaceholder as TranslationKey | undefined;
-    if (key) {
-      element.placeholder = t(key);
-    }
-  });
+  document
+    .querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement
+    >("[data-i18n-placeholder]")
+    .forEach((element) => {
+      const key = element.dataset.i18nPlaceholder as TranslationKey | undefined;
+      if (key) {
+        element.placeholder = t(key);
+      }
+    });
 
-  document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((element) => {
-    const key = element.dataset.i18nAriaLabel as TranslationKey | undefined;
-    if (key) {
-      element.setAttribute("aria-label", t(key));
-    }
-  });
+  document
+    .querySelectorAll<HTMLElement>("[data-i18n-aria-label]")
+    .forEach((element) => {
+      const key = element.dataset.i18nAriaLabel as TranslationKey | undefined;
+      if (key) {
+        element.setAttribute("aria-label", t(key));
+      }
+    });
 
-  document.querySelectorAll<HTMLImageElement>("[data-i18n-alt]").forEach((element) => {
-    const key = element.dataset.i18nAlt as TranslationKey | undefined;
-    if (key) {
-      element.alt = t(key);
-    }
-  });
+  document
+    .querySelectorAll<HTMLImageElement>("[data-i18n-alt]")
+    .forEach((element) => {
+      const key = element.dataset.i18nAlt as TranslationKey | undefined;
+      if (key) {
+        element.alt = t(key);
+      }
+    });
 
   elements.languageEn.classList.toggle("is-active", state.language === "en");
   elements.languageZh.classList.toggle("is-active", state.language === "zh");
-  elements.languageEn.setAttribute("aria-pressed", String(state.language === "en"));
-  elements.languageZh.setAttribute("aria-pressed", String(state.language === "zh"));
+  elements.languageEn.setAttribute(
+    "aria-pressed",
+    String(state.language === "en"),
+  );
+  elements.languageZh.setAttribute(
+    "aria-pressed",
+    String(state.language === "zh"),
+  );
   elements.appVersion.textContent = APP_VERSION;
   if (state.updateStatus) {
-    renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
+    renderUpdateStatus(
+      t(state.updateStatus.key, state.updateStatus.values),
+      state.updateStatus.tone,
+    );
   }
   renderCookiesFile(state.cookiesFile, state.cookiesOrigin);
   renderToolchainRevision();
@@ -256,6 +342,9 @@ function applyTranslations() {
   if (state.releaseNotesOpen) {
     renderReleaseNotes();
   }
+  queue.render();
+  playlist.render();
+  updateDownloadOptions();
 }
 
 function setLanguage(language: Language) {
@@ -273,19 +362,6 @@ function setGithubAccessMode(accessMode: GithubAccessMode) {
   clearUpdateStatus();
   updateGithubAccessButtons();
   updateButtons();
-}
-
-function setSettingsOpen(isOpen: boolean) {
-  elements.settingsDrawer.hidden = !isOpen;
-  elements.settingsBackdrop.hidden = !isOpen;
-  elements.settingsDrawer.setAttribute("aria-hidden", String(!isOpen));
-  document.body.classList.toggle("settings-open", isOpen);
-
-  if (isOpen) {
-    elements.settingsClose.focus();
-  } else {
-    elements.settingsToggle.focus();
-  }
 }
 
 function maybeShowReleaseNotesAfterUpdate() {
@@ -317,6 +393,7 @@ function setReleaseNotesOpen(isOpen: boolean) {
   elements.releaseNotesBackdrop.hidden = !isOpen;
   elements.releaseNotesDialog.setAttribute("aria-hidden", String(!isOpen));
   document.body.classList.toggle("modal-open", isOpen);
+  elements.appShell.inert = isOpen;
 
   if (isOpen) {
     elements.releaseNotesClose.focus();
@@ -344,42 +421,121 @@ function renderReleaseNotes() {
 function bindEvents() {
   elements.retryStartup.addEventListener("click", () => void bootstrap());
   elements.parse.addEventListener("click", () => void parseCurrentUrl());
-  elements.download.addEventListener("click", () => void downloadCurrentVideo());
-  elements.cancel.addEventListener("click", () => void cancelCurrentOperation());
-  elements.chooseCookies.addEventListener("click", () => void chooseCookiesFile());
-  elements.clearCookies.addEventListener("click", () => void clearCookiesFile());
-  elements.settingsToggle.addEventListener("click", () => setSettingsOpen(true));
-  elements.settingsClose.addEventListener("click", () => setSettingsOpen(false));
-  elements.settingsBackdrop.addEventListener("click", () => setSettingsOpen(false));
+  elements.download.addEventListener(
+    "click",
+    () => void enqueueCurrentSelection(),
+  );
+  must("#scope-video").addEventListener(
+    "click",
+    () => void parseCurrentUrl("video"),
+  );
+  must("#scope-playlist").addEventListener(
+    "click",
+    () => void parseCurrentUrl("playlist"),
+  );
+  must("#media-mode").addEventListener("change", () => {
+    updateDownloadOptions(true);
+    updateButtons();
+  });
+  elements.cancel.addEventListener(
+    "click",
+    () => void cancelCurrentOperation(),
+  );
+  elements.chooseCookies.addEventListener(
+    "click",
+    () => void chooseCookiesFile(),
+  );
+  elements.clearCookies.addEventListener(
+    "click",
+    () => void clearCookiesFile(),
+  );
   elements.languageEn.addEventListener("click", () => setLanguage("en"));
   elements.languageZh.addEventListener("click", () => setLanguage("zh"));
-  elements.toolSourceManaged.addEventListener("click", () => void setToolchainSource("managed"));
-  elements.toolSourceLocal.addEventListener("click", () => void setToolchainSource("local"));
-  elements.chooseLocalYtDlp.addEventListener("click", () => void chooseLocalTool("yt-dlp"));
-  elements.chooseLocalFfmpeg.addEventListener("click", () => void chooseLocalTool("ffmpeg"));
-  elements.chooseLocalDeno.addEventListener("click", () => void chooseLocalTool("deno"));
-  elements.autoDetectLocalTools.addEventListener("click", () => void autoDetectLocalTools());
+  elements.toolSourceManaged.addEventListener(
+    "click",
+    () => void setToolchainSource("managed"),
+  );
+  elements.toolSourceLocal.addEventListener(
+    "click",
+    () => void setToolchainSource("local"),
+  );
+  elements.chooseLocalYtDlp.addEventListener(
+    "click",
+    () => void chooseLocalTool("yt-dlp"),
+  );
+  elements.chooseLocalFfmpeg.addEventListener(
+    "click",
+    () => void chooseLocalTool("ffmpeg"),
+  );
+  elements.chooseLocalDeno.addEventListener(
+    "click",
+    () => void chooseLocalTool("deno"),
+  );
+  elements.autoDetectLocalTools.addEventListener(
+    "click",
+    () => void autoDetectLocalTools(),
+  );
   elements.verifyTools.addEventListener("click", () => void verifyTools());
-  elements.checkToolUpdates.addEventListener("click", () => void checkToolUpdates());
+  elements.checkToolUpdates.addEventListener(
+    "click",
+    () => void checkToolUpdates(),
+  );
   elements.installTools.addEventListener("click", () => void installTools());
-  elements.reinstallTools.addEventListener("click", () => void reinstallTools());
-  elements.openFolder.addEventListener("click", () => void openDownloadFolder());
-  elements.browseFolder.addEventListener("click", () => void browseDownloadFolder());
-  elements.saveFolder.addEventListener("click", () => void saveDownloadFolder());
-  elements.resetFolder.addEventListener("click", () => void resetDownloadFolder());
+  elements.reinstallTools.addEventListener(
+    "click",
+    () => void reinstallTools(),
+  );
+  elements.openFolder.addEventListener(
+    "click",
+    () => void openDownloadFolder(),
+  );
+  elements.browseFolder.addEventListener(
+    "click",
+    () => void browseDownloadFolder(),
+  );
+  elements.saveFolder.addEventListener(
+    "click",
+    () => void saveDownloadFolder(),
+  );
+  elements.resetFolder.addEventListener(
+    "click",
+    () => void resetDownloadFolder(),
+  );
   elements.checkUpdates.addEventListener("click", () => void checkForUpdates());
-  elements.releaseLink.addEventListener("click", () => void openLatestRelease());
-  elements.releaseNotesButton.addEventListener("click", () => showReleaseNotes());
-  elements.githubLink.addEventListener("click", () => void openProjectRepository());
-  elements.githubDirect.addEventListener("click", () => setGithubAccessMode("direct"));
-  elements.githubProxy.addEventListener("click", () => setGithubAccessMode("gh-proxy"));
+  elements.releaseLink.addEventListener(
+    "click",
+    () => void openLatestRelease(),
+  );
+  elements.releaseNotesButton.addEventListener("click", () =>
+    showReleaseNotes(),
+  );
+  elements.githubLink.addEventListener(
+    "click",
+    () => void openProjectRepository(),
+  );
+  elements.githubDirect.addEventListener("click", () =>
+    setGithubAccessMode("direct"),
+  );
+  elements.githubProxy.addEventListener("click", () =>
+    setGithubAccessMode("gh-proxy"),
+  );
   elements.thumbnail.addEventListener("load", () => showLoadedThumbnail());
-  elements.thumbnail.addEventListener("error", () => loadNextThumbnailCandidate());
-  elements.releaseNotesClose.addEventListener("click", () => closeReleaseNotes());
-  elements.releaseNotesDone.addEventListener("click", () => closeReleaseNotes());
-  elements.releaseNotesBackdrop.addEventListener("click", () => closeReleaseNotes());
+  elements.thumbnail.addEventListener("error", () =>
+    loadNextThumbnailCandidate(),
+  );
+  elements.releaseNotesClose.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
+  elements.releaseNotesDone.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
+  elements.releaseNotesBackdrop.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
   elements.quality.addEventListener("change", () => {
-    state.selectedFormat = state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
+    state.selectedFormat =
+      state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
+    updateDownloadOptions();
     updateButtons();
   });
   elements.url.addEventListener("input", () => {
@@ -395,6 +551,17 @@ function bindEvents() {
     }
   });
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && state.releaseNotesOpen) {
+      const buttons = [elements.releaseNotesClose, elements.releaseNotesDone];
+      if (event.shiftKey && document.activeElement === buttons[0]) {
+        event.preventDefault();
+        buttons[1].focus();
+      } else if (!event.shiftKey && document.activeElement === buttons[1]) {
+        event.preventDefault();
+        buttons[0].focus();
+      }
+      return;
+    }
     if (event.key !== "Escape") {
       return;
     }
@@ -404,8 +571,8 @@ function bindEvents() {
       return;
     }
 
-    if (!elements.settingsDrawer.hidden) {
-      setSettingsOpen(false);
+    if (navigation.current() === "settings") {
+      navigation.back();
       return;
     }
 
@@ -427,6 +594,10 @@ async function bootstrap() {
   logEvent(t("event.booted"));
   try {
     await loadAppState();
+    if (!queueInitialized) {
+      await queue.initialize();
+      queueInitialized = true;
+    }
     maybeShowReleaseNotesAfterUpdate();
     state.initialized = true;
   } catch (error) {
@@ -452,7 +623,10 @@ async function loadAppState() {
 function applyAppState(appState: AppState) {
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
-  elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
+  elements.homeDirectory.textContent = appState.download_directory;
+  elements.directoryPreview.textContent = appState.download_directory;
+  elements.toolRoot.textContent =
+    appState.tools_root || t("settings.toolsPathPending");
   state.toolchainRevision = appState.toolchain_revision ?? null;
   state.toolchainSource = appState.toolchain_source;
   state.localToolchain = appState.local_toolchain;
@@ -460,12 +634,33 @@ function applyAppState(appState: AppState) {
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
-  renderCookiesFile(appState.cookies_file ?? null, appState.cookies_origin ?? null);
+  renderCookiesFile(
+    appState.cookies_file ?? null,
+    appState.cookies_origin ?? null,
+  );
 }
 
-async function parseCurrentUrl() {
+async function parseCurrentUrl(scope?: "video" | "playlist") {
   const url = elements.url.value.trim();
   if (!url || state.busy || !state.initialized || !state.toolsReady) {
+    return;
+  }
+
+  const inferred = scope ?? linkScope(url);
+  if (inferred === "choice") {
+    invalidateParsedVideo(t("preview.emptyStart"));
+    showingScope = true;
+    must<HTMLElement>("#scope-chooser").hidden = false;
+    updateButtons();
+    return;
+  }
+  showingScope = false;
+  must<HTMLElement>("#scope-chooser").hidden = true;
+  if (inferred === "playlist") {
+    invalidateParsedVideo(t("preview.readingMetadata"));
+    state.lastUrl = url;
+    updateDownloadOptions(true);
+    await playlist.parse(url);
     return;
   }
 
@@ -477,11 +672,18 @@ async function parseCurrentUrl() {
       elements.progressText.textContent = t("progress.idle");
       return;
     }
+    if (state.cancelRequested) throw "Operation cancelled.";
+    if (metadata.is_playlist) {
+      if (scope === "video") throw new Error(t("scope.videoUnavailable"));
+      state.lastUrl = url;
+      await playlist.parse(url);
+      return;
+    }
     state.metadata = metadata;
     state.lastUrl = url;
     state.selectedFormat = metadata.format_options[0] ?? null;
     renderMetadata(metadata);
-    renderQualityOptions(metadata.format_options);
+    updateDownloadOptions(true);
     elements.progressText.textContent = t("progress.metadataReady");
     showNotice(t("notice.metadataParsed"), "success");
     logEvent(t("event.parsed", { title: metadata.title }));
@@ -506,47 +708,123 @@ async function parseCurrentUrl() {
   }
 }
 
-async function downloadCurrentVideo() {
-  const metadata = state.metadata;
-  const selectedFormat = state.selectedFormat;
-  const url = state.lastUrl;
-  if (!metadata || !selectedFormat || !url || state.busy) {
-    return;
-  }
-
-  setBusy(true, t("progress.startingDownload", { quality: selectedFormat.label }), "download");
-  elements.progress.removeAttribute("value");
+async function enqueueCurrentSelection() {
+  if (state.busy || enqueueing || !state.toolsReady) return;
+  const audio = must<HTMLSelectElement>("#media-mode").value === "audio";
+  const format = audio
+    ? { format_selector: "ba/b", label: t("download.audioOnly") }
+    : playlist.active
+      ? playlistQualities[elements.quality.selectedIndex]
+      : state.selectedFormat;
+  if (!format) return;
+  const label =
+    playlist.active && !audio && elements.quality.selectedIndex === 0
+      ? t("download.best")
+      : format.label;
+  const common = {
+    format_selector: format.format_selector,
+    label,
+    audio_only: audio,
+  };
+  const requests: DownloadInput[] = playlist.active
+    ? playlist.selected.map((item) => ({
+        ...common,
+        url: item.url!,
+        title: item.title,
+        video_id: item.id,
+        thumbnail_url: item.thumbnail_url,
+        playlist: {
+          url: playlist.url,
+          title: playlist.title,
+          index: item.index,
+        },
+      }))
+    : state.metadata
+      ? [
+          {
+            ...common,
+            url: state.metadata.webpage_url || state.lastUrl,
+            title: state.metadata.title,
+            video_id: state.metadata.id,
+            thumbnail_url: state.metadata.thumbnail_url,
+          },
+        ]
+      : [];
+  if (!requests.length) return;
+  enqueueing = true;
+  updateButtons();
   try {
-    const outputPath = await invoke<string | null>("download_video", {
-      request: {
-        url,
-        format_selector: selectedFormat.format_selector,
-        label: selectedFormat.label,
-      },
-    });
-    elements.progress.value = 100;
-    elements.progressText.textContent = outputPath ? t("progress.savedTo", { path: outputPath }) : t("progress.completedOpenFolder");
-    showNotice(t("notice.downloadCompleted"), "success");
-    logEvent(outputPath ? t("event.saved", { path: outputPath }) : t("event.downloadCompleted"));
+    await queue.enqueue(requests);
+    navigation.show("queue");
+    showNotice(t("download.added", { count: requests.length }), "success");
   } catch (error) {
-    const message = String(error);
-    elements.progress.value = 0;
-    if (message === "Operation cancelled.") {
-      elements.progressText.textContent = t("progress.downloadCancelled");
-      showNotice(t("notice.downloadCancelled"), "warning");
-      logEvent(t("event.downloadCancelled"));
-    } else {
-      elements.progressText.textContent = t("progress.downloadFailed");
-      showNotice(message, "error");
-      logEvent(t("event.downloadFailed"));
-    }
+    showNotice(String(error), "error");
   } finally {
-    setBusy(false);
+    enqueueing = false;
+    updateButtons();
   }
 }
 
+function updateDownloadOptions(resetQuality = false) {
+  const audio = must<HTMLSelectElement>("#media-mode").value === "audio";
+  if (resetQuality || (playlist.active && !elements.quality.children.length)) {
+    const options = audio
+      ? [
+          {
+            label: t("download.audioOnly"),
+            format_selector: "ba/b",
+            extension: "",
+            is_best: true,
+          },
+        ]
+      : playlist.active
+        ? playlistQualities.map((format, index) => ({
+            ...format,
+            label: index === 0 ? t("download.best") : format.label,
+            extension: "mp4",
+            is_best: index === 0,
+          }))
+        : (state.metadata?.format_options ?? []);
+    renderQualityOptions(options);
+    if (!playlist.active && !audio) state.selectedFormat = options[0] ?? null;
+  }
+  const firstOption = elements.quality.children[0];
+  if (firstOption && audio) firstOption.textContent = t("download.audioOnly");
+  else if (firstOption && playlist.active)
+    firstOption.textContent = t("download.best");
+  must<HTMLElement>("#preview-panel").hidden = playlist.active;
+  must<HTMLElement>("#playlist-panel").hidden = !playlist.active;
+  must<HTMLElement>("#quality-hint").textContent = audio
+    ? t("download.audioHint")
+    : playlist.active
+      ? t("playlist.qualityHint")
+      : "";
+  const count = playlist.active
+    ? playlist.selected.length
+    : state.metadata
+      ? 1
+      : 0;
+  must<HTMLElement>("#selected-summary").textContent = t("download.selected", {
+    count,
+  });
+  const root = elements.folderText.textContent || "";
+  elements.directoryPreview.textContent =
+    playlist.active && playlist.directory
+      ? `${root}${root.includes("\\") ? "\\" : "/"}${playlist.directory}`
+      : root;
+  must<HTMLElement>("#filename-section").hidden = !playlist.active;
+  must<HTMLElement>("#filename-preview").replaceChildren(
+    ...playlist.selected.slice(0, 3).map((item) => {
+      const line = document.createElement("p");
+      line.textContent = `${item.filename || `${String(item.index).padStart(2, "0")} - ${item.title}`}.…`;
+      line.title = line.textContent;
+      return line;
+    }),
+  );
+}
+
 async function cancelCurrentOperation() {
-  if ((state.activeOperation !== "download" && state.activeOperation !== "metadata") || state.cancelRequested) {
+  if (state.activeOperation !== "metadata" || state.cancelRequested) {
     return;
   }
 
@@ -554,7 +832,7 @@ async function cancelCurrentOperation() {
   elements.progressText.textContent = t("progress.cancelling");
   updateButtons();
   try {
-    await invoke("cancel_download");
+    await invoke("cancel_metadata");
     logEvent(t("event.cancelRequested"));
   } catch (error) {
     showNotice(String(error), "error");
@@ -662,9 +940,13 @@ async function browseDownloadFolder() {
 
 async function saveDownloadFolder() {
   try {
-    const appState = await invoke<AppState>("set_download_directory", { directory: elements.folderInput.value });
+    const appState = await invoke<AppState>("set_download_directory", {
+      directory: elements.folderInput.value,
+    });
     elements.folderText.textContent = appState.download_directory;
     elements.folderInput.value = appState.download_directory;
+    elements.homeDirectory.textContent = appState.download_directory;
+    updateDownloadOptions();
     showNotice(t("notice.folderUpdated"), "success");
   } catch (error) {
     showNotice(String(error), "error");
@@ -676,6 +958,8 @@ async function resetDownloadFolder() {
     const appState = await invoke<AppState>("reset_download_directory");
     elements.folderText.textContent = appState.download_directory;
     elements.folderInput.value = appState.download_directory;
+    elements.homeDirectory.textContent = appState.download_directory;
+    updateDownloadOptions();
     showNotice(t("notice.folderReset"), "success");
   } catch (error) {
     showNotice(String(error), "error");
@@ -752,6 +1036,9 @@ function renderEmptyPreview(message: string) {
 }
 
 function invalidateParsedVideo(message: string) {
+  playlist.reset();
+  showingScope = false;
+  must<HTMLElement>("#scope-chooser").hidden = true;
   state.metadata = null;
   state.selectedFormat = null;
   state.lastUrl = "";
@@ -828,24 +1115,11 @@ function renderQualityOptions(options: VideoFormatOption[]) {
   elements.quality.disabled = options.length === 0;
 }
 
-function updateDownloadProgress(progress: DownloadProgress) {
-  if (typeof progress.percent === "number") {
-    elements.progress.value = progress.percent;
-  } else {
-    elements.progress.removeAttribute("value");
-  }
-
-  elements.progressText.textContent = [
-    progress.status,
-    typeof progress.percent === "number" ? `${progress.percent.toFixed(1)}%` : null,
-    progress.speed,
-    progress.eta ? `${t("progress.eta")} ${progress.eta}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function setBusy(isBusy: boolean, progressText?: string, operation: "metadata" | "download" | "tools" | null = null) {
+function setBusy(
+  isBusy: boolean,
+  progressText?: string,
+  operation: "metadata" | "tools" | null = null,
+) {
   state.busy = isBusy;
   state.activeOperation = isBusy ? operation : null;
   if (!isBusy) {
@@ -870,24 +1144,68 @@ function renderCookiesFile(file: string | null, origin: string | null = null) {
 }
 
 function updateButtons() {
+  const hasContent = Boolean(state.metadata) || playlist.active;
+  elements.workspace.hidden = !hasContent;
+  elements.newView.classList.toggle("has-content", hasContent);
+  elements.newView.classList.toggle("has-scope", showingScope);
+  elements.emptyHints.hidden = hasContent || state.busy || showingScope;
+  elements.toolsRequired.hidden =
+    !state.initialized || state.toolsReady || state.activeOperation === "tools";
+  elements.appToolStatus.textContent = t(
+    state.toolsReady ? "settings.toolsAvailable" : "settings.toolsMissing",
+  );
+  elements.operationStatus.hidden =
+    !state.busy &&
+    elements.retryStartup.hidden &&
+    Boolean(
+      hasContent ||
+        !elements.progressText.textContent ||
+        elements.progressText.textContent === t("progress.idle"),
+    );
+  elements.progress.hidden = true;
+  elements.cancel.hidden = state.activeOperation !== "metadata";
   const configurationUnavailable = state.busy || !state.initialized;
   const hasUrl = elements.url.value.trim().length > 0;
   elements.retryStartup.disabled = state.busy;
-  elements.parse.disabled = configurationUnavailable || !hasUrl || !state.toolsReady;
-  elements.download.disabled = configurationUnavailable || !state.metadata || !state.selectedFormat || !state.toolsReady;
-  elements.cancel.disabled = (state.activeOperation !== "download" && state.activeOperation !== "metadata") || state.cancelRequested;
+  elements.parse.disabled =
+    configurationUnavailable || !hasUrl || !state.toolsReady;
+  elements.download.disabled =
+    configurationUnavailable ||
+    enqueueing ||
+    !state.toolsReady ||
+    (playlist.active
+      ? playlist.selected.length === 0
+      : !state.metadata ||
+        (!state.selectedFormat &&
+          must<HTMLSelectElement>("#media-mode").value !== "audio"));
+  elements.quality.disabled =
+    configurationUnavailable ||
+    !hasContent ||
+    must<HTMLSelectElement>("#media-mode").value === "audio";
+  must<HTMLSelectElement>("#media-mode").disabled = configurationUnavailable;
+  const toolsUnavailable = configurationUnavailable || queue.unfinished;
+  must<HTMLElement>("#queue-tool-lock").hidden = !queue.unfinished;
+  elements.cancel.disabled =
+    state.activeOperation !== "metadata" || state.cancelRequested;
   elements.chooseCookies.disabled = configurationUnavailable;
-  elements.clearCookies.disabled = configurationUnavailable || !state.cookiesFile;
-  elements.toolSourceManaged.disabled = configurationUnavailable;
-  elements.toolSourceLocal.disabled = configurationUnavailable;
-  elements.chooseLocalYtDlp.disabled = configurationUnavailable || state.toolchainSource !== "local";
-  elements.chooseLocalFfmpeg.disabled = configurationUnavailable || state.toolchainSource !== "local";
-  elements.chooseLocalDeno.disabled = configurationUnavailable || state.toolchainSource !== "local";
-  elements.autoDetectLocalTools.disabled = configurationUnavailable || state.toolchainSource !== "local";
+  elements.clearCookies.disabled =
+    configurationUnavailable || !state.cookiesFile;
+  elements.toolSourceManaged.disabled = toolsUnavailable;
+  elements.toolSourceLocal.disabled = toolsUnavailable;
+  elements.chooseLocalYtDlp.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.chooseLocalFfmpeg.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.chooseLocalDeno.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.autoDetectLocalTools.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
   elements.verifyTools.disabled = configurationUnavailable;
-  elements.checkToolUpdates.disabled = configurationUnavailable || state.toolchainSource !== "managed";
-  elements.installTools.disabled = configurationUnavailable || !state.toolAction;
-  elements.reinstallTools.disabled = configurationUnavailable || state.toolchainSource !== "managed";
+  elements.checkToolUpdates.disabled =
+    configurationUnavailable || state.toolchainSource !== "managed";
+  elements.installTools.disabled = toolsUnavailable || !state.toolAction;
+  elements.reinstallTools.disabled =
+    toolsUnavailable || state.toolchainSource !== "managed";
   elements.openFolder.disabled = configurationUnavailable;
   elements.browseFolder.disabled = configurationUnavailable;
   elements.saveFolder.disabled = configurationUnavailable;
@@ -895,6 +1213,9 @@ function updateButtons() {
   elements.checkUpdates.disabled = state.updateChecking;
   elements.githubDirect.disabled = state.updateChecking;
   elements.githubProxy.disabled = state.updateChecking;
+  for (const id of ["scope-video", "scope-playlist"])
+    must<HTMLButtonElement>(`#${id}`).disabled =
+      configurationUnavailable || !state.toolsReady;
 }
 
 function showNotice(message: string, tone: NoticeTone) {

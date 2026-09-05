@@ -1,7 +1,7 @@
 [package]
 name = "yt-dlp-tauri"
 default-run = "yt-dlp-tauri"
-version = "0.1.13"
+version = "0.2.0"
 description = "A minimal Tauri desktop downloader powered by yt-dlp"
 authors = ["Chlie"]
 license = "GPL-3.0-only"

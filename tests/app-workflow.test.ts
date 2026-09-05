@@ -1,27 +1,45 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createApp, deferred, flush, healthyTools, managedAppState, video } from "./helpers/app-harness.ts";
+import {
+  createApp,
+  deferred,
+  flush,
+  healthyTools,
+  managedAppState,
+  video,
+} from "./helpers/app-harness.ts";
 
 test("startup errors are visible and retry loads configuration before enabling operations", async () => {
   let fail = true;
-  const app = await createApp({ get_app_state: () => {
-    if (fail) throw new Error("Invalid Cookie selection");
-    return managedAppState;
-  } });
+  const app = await createApp({
+    get_app_state: () => {
+      if (fail) throw new Error("Invalid Cookie selection");
+      return managedAppState;
+    },
+  });
   app.input(video.webpage_url);
   assert.equal(app.el("retry-startup").hidden, false);
   assert.equal(app.el("parse").disabled, true);
   assert.equal(app.el("save-folder").disabled, true);
-  assert.match(app.el("progress-text").textContent, /Invalid Cookie selection/u);
+  assert.match(
+    app.el("progress-text").textContent,
+    /Invalid Cookie selection/u,
+  );
   assert.equal(app.el("toast-region").children.length, 1);
   app.el("url").dispatch("keydown", { key: "Enter", preventDefault() {} });
-  assert.deepEqual(app.calls.map(call => call.command), ["get_app_state"]);
+  assert.deepEqual(
+    app.calls.map((call) => call.command),
+    ["get_app_state"],
+  );
   fail = false;
   await app.click("retry-startup");
   assert.equal(app.el("retry-startup").hidden, true);
   assert.equal(app.el("parse").disabled, false);
   assert.equal(app.el("save-folder").disabled, false);
-  assert.deepEqual(app.calls.map(call => call.command), ["get_app_state", "get_app_state", "check_tools"]);
+  assert.deepEqual(
+    app.calls.map((call) => call.command),
+    ["get_app_state", "get_app_state", "get_download_queue", "check_tools"],
+  );
   await app.click("parse");
   assert.equal(app.el("download").disabled, false);
 });
@@ -33,13 +51,17 @@ for (const [name, availability, button, command] of [
 ]) {
   test(`${name} reports success once and restores the controls`, async () => {
     const app = await createApp({
-      check_tools: () => healthyTools.map(tool => ({ ...tool, availability })),
+      check_tools: () =>
+        healthyTools.map((tool) => ({ ...tool, availability })),
       [command]: () => healthyTools,
     });
     app.el("toast-region").replaceChildren();
     app.input(video.webpage_url);
     await app.click(button);
-    assert.equal(app.calls.filter(call => call.command === command).length, 1);
+    assert.equal(
+      app.calls.filter((call) => call.command === command).length,
+      1,
+    );
     const notices = app.el("toast-region").children;
     assert.equal(notices.length, 1);
     assert.equal(notices[0].children[1].textContent, "Toolchain installed");
@@ -73,7 +95,10 @@ test("changing the URL discards a pending parse result and keeps download disabl
   assert.equal(app.el("download").disabled, true);
   assert.notEqual(app.el("video-title").textContent, video.title);
   await app.click("download");
-  assert.equal(app.calls.filter(call => call.command === "download_video").length, 0);
+  assert.equal(
+    app.calls.filter((call) => call.command === "enqueue_downloads").length,
+    0,
+  );
   assert.equal(app.el("parse").disabled, false);
 });
 
@@ -98,17 +123,27 @@ test("successful parsing downloads the selected video", async () => {
   app.input(video.webpage_url);
   await app.click("parse");
   await app.click("download");
-  const download = app.calls.find(call => call.command === "download_video");
-  assert.equal(download?.args.request.url, video.webpage_url);
-  assert.equal(download?.args.request.format_selector, "b");
-  assert.equal(app.el("progress").value, 100);
+  const download = app.calls.find(
+    (call) => call.command === "enqueue_downloads",
+  );
+  assert.equal(download?.args.requests[0].url, video.webpage_url);
+  assert.equal(download?.args.requests[0].format_selector, "b");
+  assert.equal(app.el("queue-view").hidden, false);
+  assert.equal(app.el("queue-list").children.length, 1);
+  assert.equal(app.el("parse").disabled, false);
 });
 
 for (const availability of ["available", "outdated"]) {
   test(`an update with ${availability} remote bytes keeps a healthy local toolchain usable`, async () => {
     const app = await createApp({
-      fetch_latest_tool_manifest: () => ({ status: "available", manifestJson: "{}", revision: "20260712.1", source: "archive" }),
-      check_tools_with_manifest: () => healthyTools.map(tool => ({ ...tool, availability })),
+      fetch_latest_tool_manifest: () => ({
+        status: "available",
+        manifestJson: "{}",
+        revision: "20260712.1",
+        source: "archive",
+      }),
+      check_tools_with_manifest: () =>
+        healthyTools.map((tool) => ({ ...tool, availability })),
     });
     app.input(video.webpage_url);
     await app.click("parse");
@@ -154,8 +189,8 @@ test("metadata parsing can be cancelled and retried", async () => {
   const parse = deferred<typeof video>();
   let attempts = 0;
   const app = await createApp({
-    parse_metadata: () => ++attempts === 1 ? parse.promise : video,
-    cancel_download: () => parse.reject("Operation cancelled."),
+    parse_metadata: () => (++attempts === 1 ? parse.promise : video),
+    cancel_metadata: () => parse.reject("Operation cancelled."),
   });
   app.input(video.webpage_url);
   await app.click("parse");
@@ -163,22 +198,27 @@ test("metadata parsing can be cancelled and retried", async () => {
   await app.click("cancel");
   assert.equal(app.el("parse").disabled, false);
   assert.equal(app.el("download").disabled, true);
-  assert.equal(app.el("progress-text").textContent, "Metadata parsing cancelled");
+  assert.equal(
+    app.el("progress-text").textContent,
+    "Metadata parsing cancelled",
+  );
   await app.click("parse");
   assert.equal(app.el("download").disabled, false);
 });
 
-test("cancelling during download preparation restores the controls", async () => {
-  const download = deferred<string>();
+test("an enqueue failure keeps the parsed selection available for retry", async () => {
   const app = await createApp({
-    download_video: () => download.promise,
-    cancel_download: () => download.reject("Operation cancelled."),
+    enqueue_downloads: () => {
+      throw new Error("Output directory unavailable");
+    },
   });
   app.input(video.webpage_url);
   await app.click("parse");
   await app.click("download");
-  await app.click("cancel");
   assert.equal(app.el("download").disabled, false);
-  assert.equal(app.el("cancel").disabled, true);
-  assert.equal(app.el("progress-text").textContent, "Download cancelled");
+  assert.equal(app.el("video-title").textContent, video.title);
+  assert.match(
+    app.el("toast-region").children[0].children[1].textContent,
+    /Output directory unavailable/u,
+  );
 });

@@ -35,7 +35,7 @@ npm run tauri build
 
 Frontend workflow tests drive the application through DOM events and mocked IPC. Rust tests include real subprocess fixtures for cancellation, timeouts, and output draining. Native Windows UI behavior and real-site downloads still need to be checked on Windows.
 
-`src/main.ts` coordinates startup and the video workflow. Toolchain settings live in `src/toolchain-settings.ts`, localized strings in `src/translations.ts`, and shared application-state types in `src/app-state.ts`.
+`src/main.ts` coordinates startup, parsing and request creation. `src/playlist-selection.ts` handles paged selection, `src/download-queue.ts` renders queue state, and `src/navigation.ts` owns page navigation. Rust `playlist.rs`, `downloads.rs`, and `queue.rs` own page extraction, individual download jobs, and scheduling respectively. Queue tests cover independent cancellation, concurrency limits, failure/retry behavior, waiting cancellation, and output-name serialization. Toolchain settings live in `src/toolchain-settings.ts`, localized strings in `src/translations.ts`, and shared application-state types in `src/app-state.ts`.
 
 ## Tool Binaries
 

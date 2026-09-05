@@ -24,11 +24,15 @@
   <img alt="yt-dlp-tauri English interface" src="./docs/assets/readme-en.png" width="920" />
 </p>
 
+<p align="center">
+  <img alt="Download queue with independent requests" src="./docs/assets/queue-en.png" width="920" />
+</p>
+
 ---
 
 ## What is yt-dlp-tauri?
 
-`yt-dlp-tauri` is a small desktop app for downloading videos with `yt-dlp` without writing command-line options by hand. Paste a video URL from a [site supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), preview the metadata, choose a quality, and download an MP4-friendly file from a focused desktop UI.
+`yt-dlp-tauri` is a small desktop app for downloading videos with `yt-dlp` without writing command-line options by hand. Paste a video or playlist URL from a [site supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), select content and quality, and manage each download as an independent request.
 
 The project is desktop-first and local-first. It is not a hosted downloader service, does not provide multi-user accounts, and is not affiliated with `yt-dlp`, FFmpeg, Deno, or Tauri.
 
@@ -36,7 +40,9 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 
 - Parse video metadata through `yt-dlp` and preview title, thumbnail, duration, source URL, description, and quality options.
 - Cancel metadata parsing at any time; parsing also stops automatically after 120 seconds.
-- Download with live progress, speed, ETA, cancellation, and a saved output folder.
+- Select playlist items by original number, invert selections, or select all loaded items; load long lists in pages of 50.
+- Manage live progress, speed, ETA, cancellation, retry, and output actions per request, with 1–3 simultaneous downloads.
+- Choose video with audio or audio-only output; playlist video quality is a resolution limit applied to each request.
 - Show configuration errors during startup and retry initialization after the reported problem is corrected.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
 - Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
@@ -100,6 +106,19 @@ The configured bundle target is `nsis`. Build output is written under:
 ```text
 src-tauri\target\release\bundle\nsis\
 ```
+
+## Download workflow
+
+1. Open **New download**, paste a link, and parse it. For a link that includes both a video and a list, choose **Current video** or **Playlist or episodes**.
+2. For a playlist, load more pages as needed and select individual rows, all loaded items, or a range such as `3,5-7`. Selection keeps original item numbers, skips unavailable items, and does not automatically include later pages. Missing duration or thumbnail information is left unavailable.
+3. Choose video/audio mode and quality, confirm the destination, and click **Add to queue**. Each selected video becomes one request with its own URL, format and output location.
+4. Open **Download queue** to cancel or retry individual requests. A failed request does not block others. **Stop starting new requests** lets running requests finish and holds waiting requests until resumed.
+
+The queue and its 1–3 concurrency setting last for the current app session; the default is 1. Closing the app with unfinished work asks for confirmation. Queue records are not restored on restart. Clearing finished records only removes their entries from the queue and leaves output files intact.
+
+Playlist downloads use a subfolder named after the playlist and filenames such as `03 - Title [video-id].mp4`. Original numbers are preserved. Unsupported filename characters are replaced, long components are bounded, and output extensions depend on the source and selected mode. Requests targeting the same base filename run serially and existing outputs are not overwritten. Retrying an interrupted download can reuse partial files supported by yt-dlp.
+
+Retry preserves the request's URL, format and destination and uses the **current** toolchain and Cookie selection. Changing the default folder or Cookie selection affects future requests; waiting requests keep the selection captured when added. Each running tool receives a private Cookie copy; the selected source file is read at startup of that operation and is not modified. Tool installation, replacement and source changes are blocked while requests remain unfinished.
 
 ## Configuration
 

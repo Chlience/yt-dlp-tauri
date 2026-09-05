@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Read},
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
@@ -10,46 +11,109 @@ use std::{
 };
 
 pub(crate) const CANCELLED: &str = "Operation cancelled.";
+const METADATA_OPERATION: &str = "metadata";
+const MAINTENANCE: &str = "tool-maintenance";
 
 #[derive(Clone, Default)]
 pub(crate) struct ProcessState {
-    active: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    active: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
 }
 
 impl ProcessState {
     // Reserve before dispatching blocking work, so cancellation also covers preparation and spawn.
     pub fn begin(&self) -> Result<Task, String> {
+        self.begin_named(METADATA_OPERATION)
+    }
+
+    pub fn begin_named(&self, id: &str) -> Result<Task, String> {
+        if id.is_empty() || id == MAINTENANCE {
+            return Err("Invalid operation identifier.".to_string());
+        }
         let mut active = self.active.lock().map_err(|error| error.to_string())?;
-        if active.is_some() {
-            return Err("Another video operation is already running.".to_string());
+        if active.contains_key(id) || active.contains_key(MAINTENANCE) {
+            return Err("This operation or tool maintenance is already running.".to_string());
         }
         let cancelled = Arc::new(AtomicBool::new(false));
-        *active = Some(Arc::clone(&cancelled));
+        active.insert(id.to_string(), Arc::clone(&cancelled));
         Ok(Task {
             state: self.clone(),
+            id: id.to_string(),
+            cancelled,
+        })
+    }
+
+    pub fn begin_maintenance(&self) -> Result<Task, String> {
+        let mut active = self.active.lock().map_err(|error| error.to_string())?;
+        if !active.is_empty() {
+            return Err("Wait for active operations before changing download tools.".to_string());
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        active.insert(MAINTENANCE.to_string(), Arc::clone(&cancelled));
+        Ok(Task {
+            state: self.clone(),
+            id: MAINTENANCE.to_string(),
             cancelled,
         })
     }
 
     pub fn cancel(&self) -> Result<(), String> {
+        self.cancel_named(METADATA_OPERATION)
+    }
+
+    pub fn cancel_named(&self, id: &str) -> Result<(), String> {
         if let Some(cancelled) = self
             .active
             .lock()
             .map_err(|error| error.to_string())?
-            .as_ref()
+            .get(id)
         {
             cancelled.store(true, Ordering::Relaxed);
         }
         Ok(())
     }
+
+    pub fn cancel_all(&self) -> Result<(), String> {
+        for cancelled in self
+            .active
+            .lock()
+            .map_err(|error| error.to_string())?
+            .values()
+        {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    pub fn is_idle(&self) -> bool {
+        self.active
+            .lock()
+            .map(|active| active.is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn wait_for_idle(&self, timeout: Duration) {
+        let started = Instant::now();
+        while !self.is_idle() && started.elapsed() < timeout {
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
 }
 
 pub(crate) struct Task {
     state: ProcessState,
+    id: String,
     cancelled: Arc<AtomicBool>,
 }
 
 impl Task {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
+
     pub fn run(
         &self,
         command: &mut Command,
@@ -64,7 +128,7 @@ impl Task {
 impl Drop for Task {
     fn drop(&mut self) {
         if let Ok(mut active) = self.state.active.lock() {
-            *active = None;
+            active.remove(&self.id);
         }
     }
 }
@@ -331,6 +395,45 @@ mod tests {
             }
             _ => panic!("Unknown fixture mode"),
         }
+    }
+
+    #[test]
+    fn named_operations_cancel_independently_and_keep_other_reservations() {
+        let state = ProcessState::default();
+        let first = state.begin_named("request-1").unwrap();
+        let second = state.begin_named("request-2").unwrap();
+        assert!(state.begin_named("request-1").is_err());
+        state.cancel_named("request-1").unwrap();
+        assert!(first.is_cancelled());
+        assert!(!second.is_cancelled());
+        drop(first);
+        assert!(state.begin_named("request-2").is_err());
+        assert!(state.begin_named("request-1").is_ok());
+        second.cancel();
+        assert!(second.is_cancelled());
+    }
+
+    #[test]
+    fn tool_maintenance_excludes_reserved_operations_in_both_directions() {
+        let state = ProcessState::default();
+        let reserved = state.begin_named("waiting-request").unwrap();
+        assert!(state.begin_maintenance().is_err());
+        drop(reserved);
+        let maintenance = state.begin_maintenance().unwrap();
+        assert!(state.begin_named("metadata").is_err());
+        assert!(state.begin_maintenance().is_err());
+        drop(maintenance);
+        assert!(state.begin_named("metadata").is_ok());
+    }
+
+    #[test]
+    fn shutdown_cancels_every_reserved_operation() {
+        let state = ProcessState::default();
+        let first = state.begin_named("request-1").unwrap();
+        let second = state.begin_named("request-2").unwrap();
+        state.cancel_all().unwrap();
+        assert!(first.is_cancelled());
+        assert!(second.is_cancelled());
     }
 
     #[test]

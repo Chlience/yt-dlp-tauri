@@ -3,13 +3,14 @@ use std::{
     env, fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 const COOKIE_HEADER_EXPIRY: &str = "2147483647";
 const SELECTION_FILE: &str = "cookies-file.json";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CookieSelection {
     pub path: PathBuf,
     pub origin: Option<String>,
@@ -70,7 +71,6 @@ pub(crate) fn save_selection(
 
 pub(crate) struct PreparedCookiesFile {
     path: PathBuf,
-    temporary: bool,
 }
 
 impl PreparedCookiesFile {
@@ -81,9 +81,7 @@ impl PreparedCookiesFile {
 
 impl Drop for PreparedCookiesFile {
     fn drop(&mut self) {
-        if self.temporary {
-            let _ = fs::remove_file(&self.path);
-        }
+        let _ = fs::remove_file(&self.path);
     }
 }
 
@@ -92,18 +90,18 @@ pub(crate) fn prepare(
     url: &str,
 ) -> Result<PreparedCookiesFile, String> {
     let content = read_content(&selection.path)?;
-    if is_netscape_cookie_content(&content) {
-        return Ok(PreparedCookiesFile {
-            path: selection.path.clone(),
-            temporary: false,
-        });
-    }
-    let parsed = http_url(url)?;
-    let origin = parsed.origin().ascii_serialization();
-    if selection.origin.as_deref() != Some(origin.as_str()) {
-        return Err("This one-line Cookie file is not bound to this site. Select it again for the current video's URL, or clear it.".to_string());
-    }
-    let converted = cookie_header_to_netscape_content(&parsed, &content)?;
+    let converted = if is_netscape_cookie_content(&content) {
+        // Each yt-dlp process may update its cookie jar. Isolate concurrent requests and preserve
+        // the user-selected source file while retaining the jar's own domain rules.
+        content
+    } else {
+        let parsed = http_url(url)?;
+        let origin = parsed.origin().ascii_serialization();
+        if selection.origin.as_deref() != Some(origin.as_str()) {
+            return Err("This one-line Cookie file is not bound to this site. Select it again for the current video's URL, or clear it.".to_string());
+        }
+        cookie_header_to_netscape_content(&parsed, &content)?
+    };
     let path = temp_cookies_file_path();
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -115,12 +113,10 @@ pub(crate) fn prepare(
     let mut file = options
         .open(&path)
         .map_err(|error| format!("Failed to create temporary Cookie file: {error}"))?;
-    let prepared = PreparedCookiesFile {
-        path,
-        temporary: true,
-    };
-    file.write_all(converted.as_bytes())
-        .map_err(|error| format!("Failed to write temporary Cookie file: {error}"))?;
+    let prepared = PreparedCookiesFile { path };
+    let result = file.write_all(converted.as_bytes());
+    drop(file);
+    result.map_err(|error| format!("Failed to write temporary Cookie file: {error}"))?;
     Ok(prepared)
 }
 
@@ -224,12 +220,14 @@ fn is_safe_cookie_field(value: &str) -> bool {
 }
 
 fn temp_cookies_file_path() -> PathBuf {
+    static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT_FILE.fetch_add(1, Ordering::Relaxed);
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
     env::temp_dir().join(format!(
-        "yt-dlp-tauri-cookies-{}-{stamp}.txt",
+        "yt-dlp-tauri-cookies-{}-{stamp}-{sequence}.txt",
         std::process::id()
     ))
 }
@@ -333,8 +331,17 @@ mod tests {
         let selection = select(source.clone(), "").unwrap();
         assert!(selection.origin.is_none());
         let prepared = prepare(&selection, "https://elsewhere.example/watch").unwrap();
-        assert_eq!(prepared.path(), source);
+        let second = prepare(&selection, "https://elsewhere.example/watch").unwrap();
+        assert_ne!(prepared.path(), source);
+        assert_ne!(prepared.path(), second.path());
+        let original = fs::read_to_string(&source).unwrap();
+        assert_eq!(fs::read_to_string(prepared.path()).unwrap(), original);
+        fs::write(prepared.path(), "changed by downloader").unwrap();
+        assert_eq!(fs::read_to_string(second.path()).unwrap(), original);
+        assert_eq!(fs::read_to_string(&source).unwrap(), original);
+        let temporary = prepared.path().to_path_buf();
         drop(prepared);
+        assert!(!temporary.exists());
         assert!(source.is_file());
         fs::write(&source, "session=CHANGED_TO_HEADER").unwrap();
         assert!(prepare(&selection, "https://elsewhere.example/watch").is_err());

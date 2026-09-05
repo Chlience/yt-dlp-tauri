@@ -2,19 +2,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
-    env,
-    fs,
+    env, fs,
     io::Write,
     path::{Path, PathBuf},
     process::Command,
+    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
 
 mod cookies;
+mod downloads;
+mod playlist;
 mod process;
+mod queue;
 use cookies::PreparedCookiesFile;
+use downloads::{DownloadInput, DownloadJob};
 use process::ProcessState;
+use queue::{QueueEvent, QueueSnapshot, QueueState};
 
 pub mod toolchain;
 
@@ -65,6 +70,7 @@ struct LocalToolchainPaths {
 
 #[derive(Debug, Serialize)]
 struct VideoMetadata {
+    is_playlist: bool,
     title: String,
     id: Option<String>,
     webpage_url: String,
@@ -82,13 +88,6 @@ struct VideoFormatOption {
     height: Option<u32>,
     extension: String,
     is_best: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownloadRequest {
-    url: String,
-    format_selector: String,
-    label: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -208,8 +207,14 @@ async fn open_download_directory() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState, String> {
+async fn set_toolchain_source(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    source: String,
+) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         let source = ToolchainSource::parse(&source)?;
         ensure_writable_directories()?;
         let tools_root = tools_root_for_source(&app, source)?;
@@ -223,9 +228,12 @@ async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState
 #[tauri::command]
 async fn set_local_toolchain(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     config: LocalToolchainInput,
 ) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         let config = LocalToolchainConfig::from_paths(
             optional_input_path(config.yt_dlp_path),
             optional_input_path(config.ffmpeg_directory),
@@ -241,8 +249,13 @@ async fn set_local_toolchain(
 }
 
 #[tauri::command]
-async fn auto_detect_local_toolchain(app: AppHandle) -> Result<AppState, String> {
+async fn auto_detect_local_toolchain(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         ensure_writable_directories()?;
         write_local_toolchain_config(&LocalToolchainConfig::default())?;
         let source = read_toolchain_source()?;
@@ -301,9 +314,12 @@ async fn fetch_latest_tool_manifest(
 #[tauri::command]
 async fn install_tools(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = read_current_manifest_json(&app)?;
@@ -322,10 +338,13 @@ async fn install_tools(
 #[tauri::command]
 async fn install_tools_from_manifest(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     manifest_json: String,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         install_and_activate_manifest(
@@ -343,10 +362,13 @@ async fn install_tools_from_manifest(
 #[tauri::command]
 async fn reinstall_tools(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     manifest_json: Option<String>,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = match manifest_json {
@@ -384,6 +406,8 @@ async fn parse_metadata(
             .args([
                 "--ignore-config",
                 "--no-playlist",
+                "--playlist-items",
+                "1",
                 "--dump-single-json",
                 "--ffmpeg-location",
             ])
@@ -422,108 +446,181 @@ async fn parse_metadata(
 }
 
 #[tauri::command]
-async fn download_video(
+fn cancel_metadata(process_state: tauri::State<'_, ProcessState>) -> Result<(), String> {
+    process_state.cancel()
+}
+
+#[tauri::command]
+async fn parse_playlist_page(
     app: AppHandle,
     process_state: tauri::State<'_, ProcessState>,
-    request: DownloadRequest,
-) -> Result<Option<String>, String> {
+    url: String,
+    start: u32,
+) -> Result<playlist::PlaylistPage, String> {
     let task = process_state.begin()?;
-
     tauri::async_runtime::spawn_blocking(move || {
-        validate_http_url(&request.url)?;
+        let url = playlist::source_url(&url)?;
+        let mut reader = playlist::PageReader::new(start)?;
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
-        ensure_writable_directories()?;
-        let output_dir = download_directory()?;
-        let cookies_file = prepared_cookies_file_for_url(&request.url)?;
-        append_log("download", &format!("Starting {} {}", request.label, request.url));
-
+        let cookies = prepared_cookies_file_for_url(&url)?;
         let mut command = Command::new(&tools.yt_dlp);
         command
             .args([
                 "--ignore-config",
-                "--no-playlist",
-                "--newline",
-                "--paths",
+                "--yes-playlist",
+                "--flat-playlist",
+                "--lazy-playlist",
+                "--dump-json",
+                "--skip-download",
+                "--playlist-items",
             ])
-            .arg(format!("home:{}", output_dir.display()))
-            .args(["--output", "%(title).200B [%(id)s].%(ext)s", "--format"])
-            .arg(if request.format_selector.trim().is_empty() {
-                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b".to_string()
-            } else {
-                request.format_selector.clone()
-            })
-            .args(["--merge-output-format", "mp4", "--ffmpeg-location"])
+            .arg(format!("{start}:{}", start + playlist::PAGE_SIZE))
+            .arg("--ffmpeg-location")
             .arg(&tools.ffmpeg_dir)
-            .args(["--js-runtimes"])
+            .arg("--js-runtimes")
             .arg(format!("deno:{}", tools.deno.display()))
             .args(yt_dlp_cookie_args(
-                cookies_file.as_ref().map(PreparedCookiesFile::path),
+                cookies.as_ref().map(PreparedCookiesFile::path),
             ))
-            .args([
-                "--progress-template",
-                &format!(
-                    "{}%(progress.status)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
-                    PROGRESS_PREFIX
-                ),
-                "--print",
-                &format!("after_move:{}%(filepath)s", OUTPUT_PATH_PREFIX),
-                "--progress",
-            ])
-            .arg(&request.url);
-
-        emit_progress(
-            &app,
-            DownloadProgress {
-                percent: None,
-                status: format!("Starting {}", request.label),
-                speed: None,
-                eta: None,
-                raw: None,
-            },
+            .arg("--")
+            .arg(&url);
+        let result = task.run(
+            &mut command,
+            "Playlist page",
+            Some(Duration::from_secs(120)),
+            |line| reader.line(line),
         );
-
-        let mut output_path = None;
-        let output = task.run(&mut command, "Video download", None, |line| {
-            if let Some(progress) = parse_progress_line(line) {
-                emit_progress(&app, progress);
-            }
-            if let Some(path) = line.strip_prefix(OUTPUT_PATH_PREFIX) {
-                output_path = Some(path.trim().to_string());
-            }
-        })?;
-        if !output.status.success() {
-            append_log("download", &format!("Failed. {}", String::from_utf8_lossy(&output.stderr)));
-            return Err(process_failure_message(
-                "Download failed.",
+        let error = match result {
+            Ok(output) if output.status.success() => None,
+            Ok(output) => Some(process_failure_message(
+                "Playlist parsing failed.",
                 output.status.code(),
                 &output.stderr,
                 &[],
-            ));
-        }
-
-        emit_progress(
-            &app,
-            DownloadProgress {
-                percent: Some(100.0),
-                status: "Completed".to_string(),
-                speed: None,
-                eta: None,
-                raw: None,
-            },
-        );
-
-        let saved_path = output_path;
-        append_log("download", &format!("Completed. Output={}", saved_path.as_deref().unwrap_or("unknown")));
-        Ok(saved_path)
+            )),
+            Err(error) => Some(error),
+        };
+        Ok(reader.finish(error))
     })
     .await
     .map_err(to_string)?
 }
 
 #[tauri::command]
-fn cancel_download(process_state: tauri::State<'_, ProcessState>) -> Result<(), String> {
-    process_state.cancel()
+fn get_download_queue(queue: tauri::State<'_, QueueState>) -> Result<QueueSnapshot, String> {
+    queue.snapshot()
+}
+
+#[tauri::command]
+async fn enqueue_downloads(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+    requests: Vec<DownloadInput>,
+) -> Result<QueueSnapshot, String> {
+    let reservation = process_state.begin_named("enqueue")?;
+    let queue = queue.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        let tools = locate_tools(&app)?;
+        require_tools(&tools)?;
+        let directory = download_directory()?;
+        let cookies = cookies::read_selection(&state_directory()?)?;
+        let jobs = requests
+            .into_iter()
+            .map(|input| DownloadJob::new(input, directory.clone(), tools.clone(), cookies.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        queue.enqueue(jobs)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
+fn cancel_request(
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+) -> Result<QueueSnapshot, String> {
+    queue.cancel(&id)
+}
+
+#[tauri::command]
+async fn retry_request(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+) -> Result<QueueSnapshot, String> {
+    let reservation = process_state.begin_named(&format!("retry-{id}"))?;
+    let queue = queue.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        let mut job = queue.job(&id)?;
+        job.tools = locate_tools(&app)?;
+        require_tools(&job.tools)?;
+        job.cookies = cookies::read_selection(&state_directory()?)?;
+        queue.retry(&id, job)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
+fn set_queue_options(
+    queue: tauri::State<'_, QueueState>,
+    concurrency: usize,
+    paused: bool,
+) -> Result<QueueSnapshot, String> {
+    queue.set_options(concurrency, paused)
+}
+
+#[tauri::command]
+fn clear_finished_requests(queue: tauri::State<'_, QueueState>) -> Result<QueueSnapshot, String> {
+    queue.clear_finished()
+}
+
+#[tauri::command]
+async fn open_request_output(
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+    folder: bool,
+) -> Result<(), String> {
+    let item = queue.item(&id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = if folder {
+            PathBuf::from(item.directory)
+        } else if item.status == queue::RequestStatus::Completed {
+            PathBuf::from(
+                item.output_path
+                    .ok_or("The output file path is unavailable.")?,
+            )
+        } else {
+            return Err("This request has not completed.".to_string());
+        };
+        if !path.exists() {
+            return Err("The output location no longer exists.".to_string());
+        }
+        open_path(&path)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
+async fn close_application(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+) -> Result<(), String> {
+    queue.shutdown();
+    let processes = process_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        processes.wait_for_idle(Duration::from_secs(3));
+        app.exit(0);
+    })
+    .await
+    .map_err(to_string)
 }
 
 fn locate_tools(app: &AppHandle) -> Result<ToolPaths, String> {
@@ -1017,6 +1114,7 @@ fn parse_metadata_json(json: &str, fallback_url: &str) -> Result<VideoMetadata, 
     let format_options = build_format_options(&root);
 
     Ok(VideoMetadata {
+        is_playlist: root.get("entries").is_some(),
         title,
         id,
         webpage_url,
@@ -1158,10 +1256,6 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
     }
 }
 
-fn emit_progress(app: &AppHandle, progress: DownloadProgress) {
-    let _ = app.emit("download-progress", progress);
-}
-
 fn emit_tool_install_progress(app: &AppHandle, progress: ToolInstallProgress) {
     let _ = app.emit("tool-install-progress", progress);
 }
@@ -1186,7 +1280,9 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         toolchain_source,
         local_toolchain,
         local_toolchain_paths,
-        cookies_file: cookies.as_ref().map(|selection| selection.path.display().to_string()),
+        cookies_file: cookies
+            .as_ref()
+            .map(|selection| selection.path.display().to_string()),
         cookies_origin: cookies.and_then(|selection| selection.origin),
     })
 }
@@ -1428,6 +1524,49 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ProcessState::default())
+        .setup(|app| {
+            let processes = app.state::<ProcessState>().inner().clone();
+            let events = app.handle().clone();
+            app.manage(QueueState::new(
+                processes,
+                Arc::new(|job, task, report| job.run(task, report)),
+                Arc::new(move |event| match event {
+                    QueueEvent::Snapshot(snapshot) => {
+                        for item in snapshot
+                            .requests
+                            .iter()
+                            .filter(|item| item.revision == snapshot.revision)
+                        {
+                            append_log(
+                                "download",
+                                &format!(
+                                    "{}: {:?}; output={}; error={}",
+                                    item.id,
+                                    item.status,
+                                    item.output_path.as_deref().unwrap_or(""),
+                                    item.error.as_deref().unwrap_or("")
+                                ),
+                            );
+                        }
+                        let _ = events.emit("queue-changed", snapshot);
+                    }
+                    QueueEvent::Progress(item) => {
+                        let _ = events.emit("request-progress", item);
+                    }
+                }),
+            ));
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.state::<QueueState>().has_unfinished()
+                    || !window.state::<ProcessState>().is_idle()
+                {
+                    api.prevent_close();
+                    let _ = window.emit("confirm-close", ());
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_app_state,
             set_download_directory,
@@ -1445,11 +1584,26 @@ pub fn run() {
             install_tools_from_manifest,
             reinstall_tools,
             parse_metadata,
-            download_video,
-            cancel_download
+            cancel_metadata,
+            parse_playlist_page,
+            get_download_queue,
+            enqueue_downloads,
+            cancel_request,
+            retry_request,
+            set_queue_options,
+            clear_finished_requests,
+            open_request_output,
+            close_application
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<QueueState>().shutdown();
+                app.state::<ProcessState>()
+                    .wait_for_idle(Duration::from_secs(3));
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1584,7 +1738,9 @@ mod tests {
     #[test]
     fn preferred_manifest_rejects_malformed_input_without_silent_fallback() {
         let valid = include_str!("../tools-manifest.json").to_string();
-        assert!(select_preferred_manifest_json("invalid".to_string(), Some(valid.clone())).is_err());
+        assert!(
+            select_preferred_manifest_json("invalid".to_string(), Some(valid.clone())).is_err()
+        );
         assert!(select_preferred_manifest_json(valid, Some("invalid".to_string())).is_err());
     }
 

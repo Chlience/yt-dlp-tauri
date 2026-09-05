@@ -10,6 +10,7 @@ class Element {
   disabled = false;
   hidden = false;
   selectedIndex = 0;
+  checked = false;
   dataset: Record<string, string> = {};
   children: Element[] = [];
   parent: Element | null = null;
@@ -20,21 +21,34 @@ class Element {
   classList = {
     add: (name: string) => this.classes.add(name),
     contains: (name: string) => this.classes.has(name),
-    toggle: (name: string, enabled: boolean) => enabled ? this.classes.add(name) : this.classes.delete(name),
+    toggle: (name: string, enabled: boolean) =>
+      enabled ? this.classes.add(name) : this.classes.delete(name),
   };
 
-  get firstElementChild() { return this.children[0] ?? null; }
-  get lastElementChild() { return this.children.at(-1) ?? null; }
-  get isConnected() { return this.parent !== null; }
+  get firstElementChild() {
+    return this.children[0] ?? null;
+  }
+  get lastElementChild() {
+    return this.children.at(-1) ?? null;
+  }
+  get isConnected() {
+    return this.parent !== null;
+  }
   set innerHTML(html: string) {
-    this.replaceChildren(...Array.from(html.matchAll(/<span class="([^"]+)"/gu), match => {
-      const child = new Element();
-      child.className = match[1];
-      return child;
-    }));
+    this.replaceChildren(
+      ...Array.from(html.matchAll(/<span class="([^"]+)"/gu), (match) => {
+        const child = new Element();
+        child.className = match[1];
+        return child;
+      }),
+    );
   }
   querySelector(selector: string) {
-    return this.children.find(child => child.className.split(" ").includes(selector.slice(1))) ?? null;
+    return (
+      this.children.find((child) =>
+        child.className.split(" ").includes(selector.slice(1)),
+      ) ?? null
+    );
   }
   addEventListener(name: string, callback: (event: unknown) => void) {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), callback]);
@@ -42,78 +56,150 @@ class Element {
   dispatch(name: string, event: unknown = {}) {
     for (const callback of this.listeners.get(name) ?? []) callback(event);
   }
-  setAttribute(name: string, value: string) { this.attributes.set(name, value); }
-  removeAttribute(name: string) { this.attributes.delete(name); }
+  setAttribute(name: string, value: string) {
+    this.attributes.set(name, value);
+  }
+  removeAttribute(name: string) {
+    this.attributes.delete(name);
+  }
   append(...children: Element[]) {
     for (const child of children) child.parent = this;
     this.children.push(...children);
   }
-  prepend(child: Element) { child.parent = this; this.children.unshift(child); }
+  prepend(child: Element) {
+    child.parent = this;
+    this.children.unshift(child);
+  }
   replaceChildren(...children: Element[]) {
     for (const child of this.children) child.parent = null;
     this.children = [];
     this.append(...children);
   }
   remove() {
-    if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this);
+    if (this.parent)
+      this.parent.children = this.parent.children.filter(
+        (child) => child !== this,
+      );
     this.parent = null;
   }
   focus() {}
 }
 
-export const healthyTools = ["yt-dlp", "ffmpeg", "ffprobe", "deno"].map(name => ({
-  name, availability: "available", version: "1", expected_version: "1", full_path: `/tools/${name}`,
-}));
+export const healthyTools = ["yt-dlp", "ffmpeg", "ffprobe", "deno"].map(
+  (name) => ({
+    name,
+    availability: "available",
+    version: "1",
+    expected_version: "1",
+    full_path: `/tools/${name}`,
+  }),
+);
 
 export const video = {
   title: "Video A",
   webpage_url: "https://video.example/a",
-  format_options: [{ label: "Best MP4", format_selector: "b", extension: "mp4", is_best: true }],
+  format_options: [
+    {
+      label: "Best MP4",
+      format_selector: "b",
+      extension: "mp4",
+      is_best: true,
+    },
+  ],
 };
 
 export const managedAppState = {
-  download_directory: "/downloads", tools_root: "/tools", toolchain_revision: "20260711.1",
-  toolchain_source: "managed", local_toolchain: { schemaVersion: 1 }, local_toolchain_paths: {}, cookies_file: null,
+  download_directory: "/downloads",
+  tools_root: "/tools",
+  toolchain_revision: "20260711.1",
+  toolchain_source: "managed",
+  local_toolchain: { schemaVersion: 1 },
+  local_toolchain_paths: {},
+  cookies_file: null,
 };
 
 type Handler = (args: any) => unknown;
 export async function createApp(handlers: Record<string, Handler> = {}) {
   const nodes = new Map<string, Element>();
-  for (const match of readFileSync("index.html", "utf8").matchAll(/\bid="([^"]+)"/gu)) {
+  for (const match of readFileSync("index.html", "utf8").matchAll(
+    /\bid="([^"]+)"/gu,
+  )) {
     nodes.set(`#${match[1]}`, new Element());
   }
+  let queue = {
+    revision: 0,
+    concurrency: 1,
+    paused: false,
+    requests: [] as any[],
+  };
   const defaults: Record<string, Handler> = {
     get_app_state: () => managedAppState,
     check_tools: () => healthyTools,
     parse_metadata: () => video,
-    download_video: () => "/downloads/video.mp4",
+    get_download_queue: () => structuredClone(queue),
+    enqueue_downloads: ({ requests }) => {
+      queue = {
+        ...queue,
+        revision: queue.revision + 1,
+        requests: [
+          ...queue.requests,
+          ...requests.map((request: any, index: number) => ({
+            id: `request-${queue.requests.length + index + 1}`,
+            revision: queue.revision + 1,
+            request,
+            status: "waiting",
+            directory: "/downloads",
+            filename: request.title,
+          })),
+        ],
+      };
+      return structuredClone(queue);
+    },
   };
   const calls: { command: string; args: any }[] = [];
+  nodes.get("#queue-filter")!.value = "all";
+  nodes.get("#media-mode")!.value = "video";
+  const ipcEvents = new Map<string, (event: unknown) => void>();
   const listeners = new Map<string, (event: unknown) => void>();
   const modules: Record<string, unknown> = {
-    "@tauri-apps/api/core": { invoke: async (command: string, args: unknown) => {
-      const payload = structuredClone(args);
-      calls.push({ command, args: payload });
-      const handler = handlers[command] ?? defaults[command];
-      if (!handler) throw new Error(`Unexpected command: ${command}`);
-      return handler(payload);
-    } },
-    "@tauri-apps/api/event": { listen: async () => () => {} },
-    "@tauri-apps/plugin-dialog": { open: async () => handlers.open?.({}) ?? null },
+    "@tauri-apps/api/core": {
+      invoke: async (command: string, args: unknown) => {
+        const payload = structuredClone(args);
+        calls.push({ command, args: payload });
+        const handler = handlers[command] ?? defaults[command];
+        if (!handler) throw new Error(`Unexpected command: ${command}`);
+        return handler(payload);
+      },
+    },
+    "@tauri-apps/api/event": {
+      listen: async (name: string, callback: (event: unknown) => void) => {
+        ipcEvents.set(name, callback);
+        return () => ipcEvents.delete(name);
+      },
+    },
+    "@tauri-apps/plugin-dialog": {
+      open: async () => handlers.open?.({}) ?? null,
+    },
     "@tauri-apps/plugin-opener": { openUrl: async () => {} },
     "../CHANGELOG.md?raw": readFileSync("CHANGELOG.md", "utf8"),
     "../package.json": JSON.parse(readFileSync("package.json", "utf8")),
   };
   const context = createContext({
+    URL,
     document: {
       querySelector: (selector: string) => nodes.get(selector) ?? null,
       querySelectorAll: () => [],
       createElement: () => new Element(),
-      documentElement: {}, body: new Element(), activeElement: null,
+      documentElement: {},
+      body: new Element(),
+      activeElement: null,
     },
     window: {
-      addEventListener: (name: string, callback: (event: unknown) => void) => listeners.set(name, callback),
-      setTimeout: () => 1, clearTimeout() {}, confirm: () => true,
+      addEventListener: (name: string, callback: (event: unknown) => void) =>
+        listeners.set(name, callback),
+      setTimeout: () => 1,
+      clearTimeout() {},
+      confirm: () => true,
     },
     HTMLElement: Element,
     navigator: { language: "en" },
@@ -126,14 +212,27 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
     const module = { exports: {} };
     loaded.set(file, module);
     const script = ts.transpileModule(readFileSync(file, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        esModuleInterop: true,
+      },
     }).outputText;
-    const execute = runInContext(`(function(require, module, exports) {\n${script}\n})`, context, { filename: file });
-    execute((name: string) => {
-      if (name in modules) return modules[name];
-      if (name.startsWith("./")) return loadModule(resolve(dirname(file), `${name}.ts`));
-      throw new Error(`Unexpected module: ${name}`);
-    }, module, module.exports);
+    const execute = runInContext(
+      `(function(require, module, exports) {\n${script}\n})`,
+      context,
+      { filename: file },
+    );
+    execute(
+      (name: string) => {
+        if (name in modules) return modules[name];
+        if (name.startsWith("./"))
+          return loadModule(resolve(dirname(file), `${name}.ts`));
+        throw new Error(`Unexpected module: ${name}`);
+      },
+      module,
+      module.exports,
+    );
     return module.exports;
   }
   loadModule(resolve("src/main.ts"));
@@ -141,6 +240,9 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
   await flush();
   return {
     calls,
+    emit(name: string, payload: unknown) {
+      ipcEvents.get(name)?.({ payload });
+    },
     el(id: string) {
       const node = nodes.get(`#${id}`);
       if (!node) throw new Error(`Unknown element: ${id}`);

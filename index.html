@@ -8,85 +8,894 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main class="app-shell">
+    <main id="app-shell" class="app-shell">
       <header class="topbar">
         <div class="brand-lockup">
-          <p class="eyebrow" data-i18n="app.eyebrow">Desktop downloader</p>
+          <span class="brand-mark" aria-hidden="true">↓</span>
           <h1>yt-dlp-tauri</h1>
         </div>
-        <div class="top-actions">
-          <div class="language-toggle" role="group" data-i18n-aria-label="language.label" aria-label="Language">
-            <button id="language-en" class="segment" type="button" data-language="en">EN</button>
-            <button id="language-zh" class="segment" type="button" data-language="zh">中</button>
-          </div>
-          <button id="settings-toggle" class="button secondary" type="button" data-i18n="action.settings">Settings</button>
-        </div>
+        <nav class="main-nav" aria-label="Main navigation">
+          <button
+            id="nav-new"
+            class="nav-button is-active"
+            type="button"
+            aria-current="page"
+            data-i18n="nav.new"
+          >
+            New download
+          </button>
+          <button id="nav-queue" class="nav-button" type="button">
+            <span data-i18n="nav.queue">Download queue</span
+            ><span id="queue-count" class="count">0</span>
+          </button>
+        </nav>
+        <button
+          id="settings-toggle"
+          class="button subtle"
+          type="button"
+          data-i18n="action.settings"
+        >
+          Settings
+        </button>
       </header>
 
-      <section class="download-surface" aria-labelledby="app-title">
-        <div class="surface-header">
+      <section id="new-view" class="page new-page" aria-labelledby="app-title">
+        <div class="page-heading">
           <div>
-            <h2 id="app-title" data-i18n="app.heading">Paste, choose, download</h2>
+            <h2 id="app-title" data-i18n="app.heading">Add a download</h2>
+            <p data-i18n="app.description">
+              Paste a video or playlist link, then choose what to download
+            </p>
           </div>
         </div>
-
         <section class="url-panel" aria-labelledby="url-heading">
-          <label for="url" id="url-heading" data-i18n="url.label">Video URL</label>
+          <label for="url" id="url-heading" data-i18n="url.label"
+            >Video or playlist URL</label
+          >
           <div class="url-row">
             <input
               id="url"
               type="url"
               spellcheck="false"
+              autocomplete="off"
               data-i18n-placeholder="url.placeholder"
               placeholder="https://www.youtube.com/watch?v=..."
-            />
-            <button id="parse" class="button primary" type="button" data-i18n="action.parse">Parse</button>
+            /><button
+              id="parse"
+              class="button primary"
+              type="button"
+              data-i18n="action.parse"
+            >
+              Parse link
+            </button>
           </div>
-          <div class="cookie-row" data-i18n-aria-label="cookies.label" aria-label="Cookie file">
-            <div class="cookie-status">
-              <span class="cookie-label" data-i18n="cookies.label">Cookie file</span>
-              <span id="cookies-file" class="cookie-file">No cookies</span>
-            </div>
-            <div class="cookie-actions">
-              <button id="choose-cookies" class="button secondary compact" type="button" data-i18n="action.chooseCookies">Choose Cookie file</button>
-              <button id="clear-cookies" class="button secondary compact" type="button" data-i18n="action.clearCookies">Clear</button>
-            </div>
+          <div class="cookie-row">
+            <span class="muted" data-i18n="cookies.label">Cookie file</span
+            ><span id="cookies-file" class="cookie-file"></span
+            ><span class="spacer"></span
+            ><button
+              id="choose-cookies"
+              class="button subtle compact"
+              type="button"
+              data-i18n="action.chooseCookies"
+            >
+              Choose Cookie file</button
+            ><button
+              id="clear-cookies"
+              class="button subtle compact"
+              type="button"
+              data-i18n="action.clearCookies"
+            >
+              Clear
+            </button>
+          </div>
+          <div class="destination-row">
+            <span class="muted" data-i18n="download.saveTo">Save to</span
+            ><span id="home-directory" class="path-text"></span
+            ><button
+              id="home-change-folder"
+              class="button subtle compact"
+              type="button"
+              data-i18n="action.change"
+            >
+              Change
+            </button>
           </div>
         </section>
 
-        <section class="preview-panel" aria-labelledby="preview-heading">
-          <div class="media-frame">
-            <img id="thumbnail" alt="video thumbnail" data-i18n-alt="preview.thumbnailAlt" referrerpolicy="no-referrer" hidden />
-            <div id="thumbnail-empty" class="empty-thumbnail">
-              <span class="empty-mark" aria-hidden="true"></span>
-              <span data-i18n="preview.emptyImage">Preview</span>
-            </div>
+        <section
+          id="scope-chooser"
+          class="scope-chooser"
+          aria-labelledby="scope-heading"
+          hidden
+        >
+          <div>
+            <h3 id="scope-heading" data-i18n="scope.heading">
+              Choose the download scope
+            </h3>
+            <p class="muted" data-i18n="scope.description">
+              This link may refer to a video and a playlist
+            </p>
           </div>
-          <div class="preview-copy">
-            <p id="preview-heading" class="section-kicker" data-i18n="preview.label">Preview</p>
-            <h3 id="video-title">No video parsed</h3>
-            <p id="video-details">Paste a video URL to inspect title, cover, duration, and qualities</p>
-            <p id="video-description"></p>
+          <div class="scope-options">
+            <button id="scope-video" class="scope-option" type="button">
+              <strong data-i18n="scope.video">Current video</strong
+              ><span data-i18n="scope.videoHint"
+                >Inspect only this video</span
+              ></button
+            ><button id="scope-playlist" class="scope-option" type="button">
+              <strong data-i18n="scope.playlist">Playlist or episodes</strong
+              ><span data-i18n="scope.playlistHint"
+                >Load the list and choose individual items</span
+              >
+            </button>
           </div>
         </section>
 
-        <section class="download-panel" aria-labelledby="download-heading">
-          <div class="quality-field">
-            <label for="quality" id="download-heading" data-i18n="download.quality">Quality</label>
-            <select id="quality" disabled></select>
+        <section
+          id="operation-status"
+          class="operation-status"
+          role="status"
+          aria-live="polite"
+          hidden
+        >
+          <div class="status-row">
+            <p id="progress-text"></p>
+            <span class="spacer"></span
+            ><button
+              id="cancel"
+              class="button subtle compact"
+              type="button"
+              disabled
+              data-i18n="action.cancel"
+            >
+              Cancel</button
+            ><button
+              id="retry-startup"
+              class="button secondary compact"
+              type="button"
+              hidden
+              data-i18n="action.retryStartup"
+            >
+              Retry startup
+            </button>
           </div>
-          <div class="download-actions">
-            <button id="download" class="button primary" type="button" disabled data-i18n="action.download">Download</button>
-            <button id="cancel" class="button danger" type="button" disabled data-i18n="action.cancel">Cancel</button>
-            <button id="open-folder" class="button secondary" type="button" data-i18n="action.openFolder">Open folder</button>
-          </div>
-          <progress id="progress" max="100" value="0"></progress>
-          <p id="progress-text" class="progress-text">Idle</p>
-          <button id="retry-startup" class="button secondary compact" hidden data-i18n="action.retryStartup">Retry startup</button>
+          <progress id="progress" max="100" value="0" hidden></progress>
         </section>
+        <section id="tools-required" class="inline-message" hidden>
+          <div>
+            <h3 data-i18n="tools.required">Download tools need attention</h3>
+            <p data-i18n="tools.requiredHint">
+              Install or verify your download tools before parsing a link
+            </p>
+          </div>
+          <button
+            id="prepare-tools"
+            class="button secondary"
+            type="button"
+            data-i18n="settings.toolchain"
+          >
+            Manage tools
+          </button>
+        </section>
+
+        <div id="download-workspace" class="download-workspace" hidden>
+          <section
+            id="preview-panel"
+            class="preview-panel"
+            aria-labelledby="preview-heading"
+          >
+            <div class="media-frame">
+              <img
+                id="thumbnail"
+                alt="video thumbnail"
+                data-i18n-alt="preview.thumbnailAlt"
+                referrerpolicy="no-referrer"
+                hidden
+              />
+              <div id="thumbnail-empty" class="empty-thumbnail">
+                <span aria-hidden="true">▷</span
+                ><span data-i18n="preview.emptyImage">Preview</span>
+              </div>
+            </div>
+            <div class="preview-copy">
+              <p
+                id="preview-heading"
+                class="section-kicker"
+                data-i18n="preview.label"
+              >
+                Preview
+              </p>
+              <h3 id="video-title"></h3>
+              <p id="video-details"></p>
+              <details>
+                <summary data-i18n="preview.description">Description</summary>
+                <p id="video-description"></p>
+              </details>
+            </div>
+          </section>
+          <section
+            id="playlist-panel"
+            class="playlist-panel"
+            aria-labelledby="playlist-title"
+            hidden
+          >
+            <div class="playlist-heading">
+              <h3 id="playlist-title"></h3>
+              <p id="playlist-summary" class="muted"></p>
+            </div>
+            <div class="selection-toolbar">
+              <button
+                id="select-all"
+                class="button secondary compact"
+                type="button"
+                data-i18n="playlist.selectAll"
+              >
+                Select all</button
+              ><button
+                id="invert-selection"
+                class="button secondary compact"
+                type="button"
+                data-i18n="playlist.invert"
+              >
+                Invert</button
+              ><label for="playlist-range" data-i18n="playlist.range"
+                >Range</label
+              ><input
+                id="playlist-range"
+                type="text"
+                placeholder="1-5,8,12"
+                spellcheck="false"
+              /><button
+                id="apply-range"
+                class="button secondary compact"
+                type="button"
+                data-i18n="action.apply"
+              >
+                Apply
+              </button>
+            </div>
+            <p
+              id="selection-error"
+              class="inline-error"
+              role="alert"
+              hidden
+            ></p>
+            <div
+              id="playlist-list"
+              class="playlist-list"
+              role="group"
+              data-i18n-aria-label="playlist.items"
+              aria-label="Playlist items"
+            ></div>
+            <div class="list-footer">
+              <span id="playlist-page-label"></span><span class="spacer"></span
+              ><button
+                id="playlist-previous"
+                class="button subtle compact"
+                type="button"
+                data-i18n="action.previous"
+              >
+                Previous</button
+              ><button
+                id="playlist-next"
+                class="button subtle compact"
+                type="button"
+                data-i18n="action.next"
+              >
+                Next</button
+              ><button
+                id="playlist-load-more"
+                class="button secondary compact"
+                type="button"
+                data-i18n="playlist.loadMore"
+              >
+                Load more
+              </button>
+            </div>
+            <p id="playlist-message" class="inline-message" hidden></p>
+          </section>
+          <aside
+            id="download-options"
+            class="download-options"
+            aria-labelledby="download-heading"
+          >
+            <div class="download-option-fields">
+              <h3 id="download-heading" data-i18n="download.settings">
+                Download settings
+              </h3>
+              <div class="mode-quality-row">
+                <div class="field">
+                  <label for="media-mode" data-i18n="download.content"
+                    >Content</label
+                  ><select id="media-mode">
+                    <option value="video" data-i18n="download.videoAudio">
+                      Video + audio
+                    </option>
+                    <option value="audio" data-i18n="download.audioOnly">
+                      Audio only
+                    </option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="quality" data-i18n="download.quality"
+                    >Quality</label
+                  ><select id="quality" disabled></select>
+                </div>
+              </div>
+              <p id="quality-hint" class="field-hint"></p>
+              <div class="field">
+                <div class="field-heading">
+                  <span data-i18n="download.saveTo">Save to</span
+                  ><button
+                    id="download-change-folder"
+                    class="button subtle compact"
+                    type="button"
+                    data-i18n="action.change"
+                  >
+                    Change
+                  </button>
+                </div>
+                <p id="download-directory-preview" class="path-preview"></p>
+              </div>
+              <div id="filename-section" class="field" hidden>
+                <span data-i18n="download.filenames">Filename preview</span>
+                <div id="filename-preview" class="filename-preview"></div>
+              </div>
+            </div>
+            <div class="download-actions">
+              <p id="selected-summary" class="muted"></p>
+              <button
+                id="download"
+                class="button primary"
+                type="button"
+                disabled
+                data-i18n="action.download"
+              >
+                Add to queue
+              </button>
+            </div>
+          </aside>
+        </div>
+        <div id="empty-hints" class="empty-hints">
+          <div>
+            <strong data-i18n="home.video">Single video</strong>
+            <p data-i18n="home.videoHint">Preview and choose a quality</p>
+          </div>
+          <div>
+            <strong data-i18n="home.playlist">Playlists and episodes</strong>
+            <p data-i18n="home.playlistHint">
+              Select all or specify item numbers
+            </p>
+          </div>
+          <div>
+            <strong data-i18n="home.queue">Individual requests</strong>
+            <p data-i18n="home.queueHint">
+              Track, cancel and retry each download
+            </p>
+          </div>
+        </div>
       </section>
-    </main>
 
+      <section
+        id="queue-view"
+        class="page queue-page"
+        aria-labelledby="queue-title"
+        hidden
+      >
+        <div class="page-heading">
+          <div>
+            <h2 id="queue-title" data-i18n="nav.queue">Download queue</h2>
+            <p data-i18n="queue.description">
+              Each request has its own progress and controls
+            </p>
+          </div>
+          <button
+            id="queue-new"
+            class="button primary"
+            type="button"
+            data-i18n="nav.new"
+          >
+            New download
+          </button>
+        </div>
+        <section id="queue-controls" class="queue-controls">
+          <p id="queue-summary" role="status" aria-live="polite"></p>
+          <span class="spacer"></span
+          ><label for="queue-concurrency" data-i18n="queue.concurrent"
+            >Simultaneous downloads</label
+          ><select id="queue-concurrency">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option></select
+          ><button
+            id="queue-pause"
+            class="button secondary"
+            type="button"
+            data-i18n="queue.stopStarting"
+          >
+            Stop starting new requests
+          </button>
+        </section>
+        <p
+          id="queue-paused-message"
+          class="inline-message"
+          hidden
+          data-i18n="queue.stoppedHint"
+        >
+          Running requests continue; waiting requests will not start until
+          resumed
+        </p>
+        <div class="queue-toolbar">
+          <label for="queue-filter" data-i18n="queue.filter">Show</label
+          ><select id="queue-filter">
+            <option value="all" data-i18n="queue.all">All requests</option>
+            <option value="active" data-i18n="queue.active">Active</option>
+            <option value="completed" data-i18n="queue.completed">
+              Completed
+            </option>
+            <option value="failed" data-i18n="queue.failed">Failed</option>
+            <option value="cancelled" data-i18n="queue.cancelled">
+              Cancelled
+            </option></select
+          ><span class="spacer"></span
+          ><button
+            id="queue-clear"
+            class="button subtle compact"
+            type="button"
+            data-i18n="queue.clearFinished"
+          >
+            Clear finished records
+          </button>
+        </div>
+        <p id="queue-error" class="inline-error" role="alert" hidden></p>
+        <p
+          id="queue-no-results"
+          class="inline-message"
+          data-i18n="queue.noMatches"
+          hidden
+        ></p>
+        <div id="queue-content" class="queue-content">
+          <div id="queue-list" class="queue-list" aria-live="off"></div>
+          <aside
+            id="request-detail"
+            class="request-detail"
+            aria-labelledby="request-detail-title"
+            hidden
+          >
+            <div class="field-heading">
+              <h3 id="request-detail-title" data-i18n="queue.details">
+                Request details
+              </h3>
+              <button
+                id="request-detail-close"
+                class="button subtle compact"
+                type="button"
+                data-i18n="action.close"
+              >
+                Close
+              </button>
+            </div>
+            <div id="request-detail-content"></div>
+          </aside>
+        </div>
+        <div id="queue-empty" class="queue-empty">
+          <span class="empty-symbol" aria-hidden="true">↓</span>
+          <h3 data-i18n="queue.empty">No download requests yet</h3>
+          <p data-i18n="queue.emptyHint">
+            Add a link and choose the content to download
+          </p>
+          <button
+            id="queue-empty-new"
+            class="button primary"
+            type="button"
+            data-i18n="nav.new"
+          >
+            New download
+          </button>
+        </div>
+      </section>
+
+      <section
+        id="settings-view"
+        class="page settings-page"
+        aria-labelledby="settings-title"
+        hidden
+      >
+        <div class="page-heading">
+          <div>
+            <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
+            <p data-i18n="settings.description">
+              Download preferences, tools and application information
+            </p>
+          </div>
+          <button
+            id="settings-close"
+            class="button subtle"
+            type="button"
+            data-i18n="action.back"
+          >
+            Back
+          </button>
+        </div>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="Settings navigation">
+            <button
+              id="settings-nav-general"
+              class="is-active"
+              type="button"
+              data-i18n="settings.general"
+            >
+              General</button
+            ><button
+              id="settings-nav-tools"
+              type="button"
+              data-i18n="settings.toolchain"
+            >
+              Tools</button
+            ><button
+              id="settings-nav-about"
+              type="button"
+              data-i18n="settings.about"
+            >
+              About
+            </button>
+          </nav>
+          <div class="settings-content">
+            <div id="settings-general">
+              <section
+                class="settings-section"
+                aria-labelledby="folder-heading"
+              >
+                <div class="settings-section-header">
+                  <h3 id="folder-heading" data-i18n="settings.outputFolder">
+                    Output folder
+                  </h3>
+                </div>
+                <div class="setting-row">
+                  <p id="folder-text" class="path-text"></p>
+                  <button
+                    id="browse-folder"
+                    class="button secondary compact"
+                    type="button"
+                    data-i18n="action.browse"
+                  >
+                    Browse</button
+                  ><button
+                    id="open-folder"
+                    class="button subtle compact"
+                    type="button"
+                    data-i18n="action.openFolder"
+                  >
+                    Open folder
+                  </button>
+                </div>
+                <details>
+                  <summary data-i18n="settings.enterPath">
+                    Enter a path manually
+                  </summary>
+                  <div class="setting-row">
+                    <input
+                      id="folder-input"
+                      type="text"
+                      spellcheck="false"
+                    /><button
+                      id="save-folder"
+                      class="button secondary compact"
+                      type="button"
+                      data-i18n="action.save"
+                    >
+                      Save</button
+                    ><button
+                      id="reset-folder"
+                      class="button subtle compact"
+                      type="button"
+                      data-i18n="action.reset"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </details>
+              </section>
+              <section class="settings-section">
+                <div class="setting-row">
+                  <label for="default-concurrency" data-i18n="queue.concurrent"
+                    >Simultaneous downloads</label
+                  ><select id="default-concurrency">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                  </select>
+                </div>
+                <p class="field-hint" data-i18n="queue.failureContinues">
+                  A failed request does not block other requests
+                </p>
+              </section>
+              <section class="settings-section">
+                <div class="setting-row">
+                  <h3 data-i18n="language.label">Language</h3>
+                  <div
+                    class="segmented"
+                    role="group"
+                    data-i18n-aria-label="language.label"
+                    aria-label="Language"
+                  >
+                    <button id="language-en" class="segment" type="button">
+                      English</button
+                    ><button id="language-zh" class="segment" type="button">
+                      简体中文
+                    </button>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <h3 data-i18n="settings.githubSite">GitHub access</h3>
+                  <div
+                    class="segmented"
+                    role="group"
+                    data-i18n-aria-label="github.accessLabel"
+                    aria-label="GitHub access"
+                  >
+                    <button
+                      id="github-direct"
+                      class="segment"
+                      type="button"
+                      data-i18n="github.direct"
+                    >
+                      Direct</button
+                    ><button
+                      id="github-proxy"
+                      class="segment"
+                      type="button"
+                      data-i18n="github.proxy"
+                    >
+                      gh-proxy
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </div>
+            <div id="settings-tools" hidden>
+              <p
+                id="queue-tool-lock"
+                class="inline-message"
+                data-i18n="queue.toolLock"
+                hidden
+              ></p>
+              <section class="settings-section" aria-labelledby="tools-heading">
+                <div class="settings-section-header">
+                  <h3 id="tools-heading" data-i18n="settings.toolchain">
+                    Toolchain
+                  </h3>
+                  <p id="toolchain-hint" data-i18n="settings.toolchainHint">
+                    Per-target tools are verified with SHA-256
+                  </p>
+                </div>
+                <div class="tool-source-row">
+                  <span data-i18n="settings.toolSource">Tool source</span>
+                  <div
+                    class="tool-source-toggle"
+                    role="group"
+                    data-i18n-aria-label="settings.toolSource"
+                    aria-label="Tool source"
+                  >
+                    <button
+                      id="tool-source-managed"
+                      class="segment"
+                      type="button"
+                      data-tool-source="managed"
+                      data-i18n="settings.managedTools"
+                    >
+                      Managed
+                    </button>
+                    <button
+                      id="tool-source-local"
+                      class="segment"
+                      type="button"
+                      data-tool-source="local"
+                      data-i18n="settings.localTools"
+                    >
+                      Local
+                    </button>
+                  </div>
+                </div>
+                <div id="managed-toolchain-details">
+                  <p id="tool-root" class="path-text">
+                    Resolving tools path...
+                  </p>
+                  <p class="toolchain-revision">
+                    <span data-i18n="settings.activeRevision"
+                      >Active revision</span
+                    >
+                    <code id="toolchain-revision">None</code>
+                  </p>
+                </div>
+                <div
+                  id="local-toolchain-paths"
+                  class="local-toolchain-paths"
+                  hidden
+                >
+                  <ul class="local-path-list">
+                    <li>
+                      <div class="local-path-copy">
+                        <span class="local-path-label">yt-dlp</span>
+                        <code id="local-yt-dlp-path">Not detected</code>
+                      </div>
+                      <button
+                        id="choose-local-yt-dlp"
+                        class="button secondary compact"
+                        type="button"
+                        data-i18n="action.choosePath"
+                        data-i18n-aria-label="action.chooseYtDlp"
+                        aria-label="Choose yt-dlp"
+                      >
+                        Choose
+                      </button>
+                    </li>
+                    <li>
+                      <div class="local-path-copy">
+                        <span class="local-path-label">FFmpeg + FFprobe</span>
+                        <code id="local-ffmpeg-path">Not detected</code>
+                      </div>
+                      <button
+                        id="choose-local-ffmpeg"
+                        class="button secondary compact"
+                        type="button"
+                        data-i18n="action.choosePath"
+                        data-i18n-aria-label="action.chooseFfmpegDirectory"
+                        aria-label="Choose FFmpeg directory"
+                      >
+                        Choose
+                      </button>
+                    </li>
+                    <li>
+                      <div class="local-path-copy">
+                        <span class="local-path-label">Deno</span>
+                        <code id="local-deno-path">Not detected</code>
+                      </div>
+                      <button
+                        id="choose-local-deno"
+                        class="button secondary compact"
+                        type="button"
+                        data-i18n="action.choosePath"
+                        data-i18n-aria-label="action.chooseDeno"
+                        aria-label="Choose Deno"
+                      >
+                        Choose
+                      </button>
+                    </li>
+                  </ul>
+                  <button
+                    id="auto-detect-local-tools"
+                    class="button secondary"
+                    type="button"
+                    data-i18n="action.usePath"
+                  >
+                    Use PATH
+                  </button>
+                </div>
+                <ul id="tool-list" class="tool-list"></ul>
+                <p id="tool-install-status" class="tool-install-status">
+                  Install missing tools automatically
+                </p>
+                <div class="tool-actions">
+                  <button
+                    id="verify-tools"
+                    class="button secondary"
+                    type="button"
+                    data-i18n="action.verifyTools"
+                  >
+                    Verify tools
+                  </button>
+                  <button
+                    id="check-tool-updates"
+                    class="button secondary"
+                    type="button"
+                    data-i18n="action.checkToolUpdates"
+                  >
+                    Check tool updates
+                  </button>
+                  <button
+                    id="install-tools"
+                    class="button primary"
+                    type="button"
+                    data-i18n="action.installTools"
+                    hidden
+                  >
+                    Install tools
+                  </button>
+                  <button
+                    id="reinstall-tools"
+                    class="button secondary"
+                    type="button"
+                    data-i18n="action.reinstallTools"
+                  >
+                    Reinstall tools
+                  </button>
+                </div>
+              </section>
+
+              <section
+                class="settings-section"
+                aria-labelledby="events-heading"
+              >
+                <div class="settings-section-header">
+                  <h3 id="events-heading" data-i18n="settings.activity">
+                    Activity
+                  </h3>
+                  <p data-i18n="settings.activityHint">Recent local events</p>
+                </div>
+                <ul id="events" class="events"></ul>
+              </section>
+            </div>
+            <div id="settings-about" hidden>
+              <section class="settings-section about-card">
+                <div class="brand-mark" aria-hidden="true">↓</div>
+                <div>
+                  <h3>yt-dlp-tauri</h3>
+                  <p>
+                    <span data-i18n="settings.version">Version</span>
+                    <span id="app-version"></span>
+                  </p>
+                </div>
+                <button
+                  id="check-updates"
+                  class="button secondary"
+                  type="button"
+                  data-i18n="action.checkUpdates"
+                >
+                  Check updates
+                </button>
+                <p
+                  id="update-status"
+                  class="update-status"
+                  aria-live="polite"
+                ></p>
+                <button
+                  id="release-link"
+                  class="button primary"
+                  type="button"
+                  hidden
+                  data-i18n="action.openRelease"
+                >
+                  Open release
+                </button>
+              </section>
+              <section class="settings-section">
+                <div class="setting-row">
+                  <h3 data-i18n="releaseNotes.title">What's new</h3>
+                  <button
+                    id="release-notes-button"
+                    class="button secondary compact"
+                    type="button"
+                    data-i18n="action.releaseNotes"
+                  >
+                    Release notes
+                  </button>
+                </div>
+                <div class="setting-row">
+                  <h3 data-i18n="action.projectHome">Project home</h3>
+                  <button
+                    id="github-link"
+                    class="button secondary compact"
+                    type="button"
+                  >
+                    GitHub ↗
+                  </button>
+                </div>
+                <div class="setting-row">
+                  <h3 data-i18n="settings.license">License</h3>
+                  <span>GPL-3.0-only</span>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
+      <footer class="app-footer">
+        <span id="app-tool-status"></span><span class="spacer"></span
+        ><span id="app-queue-status"></span>
+      </footer>
+    </main>
     <div
       id="toast-region"
       class="toast-region"
@@ -96,120 +905,6 @@
       data-i18n-aria-label="notifications.label"
       aria-label="Notifications"
     ></div>
-
-    <div id="settings-backdrop" class="settings-backdrop" hidden></div>
-    <aside id="settings-drawer" class="settings-drawer" aria-labelledby="settings-title" aria-hidden="true" hidden>
-      <div class="drawer-header">
-        <div>
-          <p class="eyebrow" data-i18n="settings.kicker">Preferences</p>
-          <h2 id="settings-title" data-i18n="settings.title">Settings</h2>
-        </div>
-        <button id="settings-close" class="icon-button" type="button" data-i18n-aria-label="action.close" aria-label="Close">×</button>
-      </div>
-
-      <section class="settings-section" aria-labelledby="folder-heading">
-        <div class="settings-section-header">
-          <h3 id="folder-heading" data-i18n="settings.outputFolder">Output folder</h3>
-          <p id="folder-text">Resolving download folder...</p>
-        </div>
-        <input id="folder-input" type="text" spellcheck="false" />
-        <div class="split-actions">
-          <button id="browse-folder" class="button secondary" type="button" data-i18n="action.browse">Browse</button>
-          <button id="save-folder" class="button secondary" type="button" data-i18n="action.save">Save</button>
-          <button id="reset-folder" class="button secondary" type="button" data-i18n="action.reset">Reset</button>
-        </div>
-      </section>
-
-      <section class="settings-section github-site-section" aria-labelledby="github-site-heading">
-        <div class="github-access-row">
-          <h3 id="github-site-heading" data-i18n="settings.githubSite">GitHub site</h3>
-          <div class="github-access-toggle" role="group" data-i18n-aria-label="github.accessLabel" aria-label="GitHub access mode">
-            <button id="github-direct" class="segment" type="button" data-github-access="direct" data-i18n="github.direct">Direct</button>
-            <button id="github-proxy" class="segment" type="button" data-github-access="gh-proxy" data-i18n="github.proxy">gh-proxy</button>
-          </div>
-        </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="tools-heading">
-        <div class="settings-section-header">
-          <h3 id="tools-heading" data-i18n="settings.toolchain">Toolchain</h3>
-          <p id="toolchain-hint" data-i18n="settings.toolchainHint">Per-target tools are verified with SHA-256</p>
-        </div>
-        <div class="tool-source-row">
-          <span data-i18n="settings.toolSource">Tool source</span>
-          <div class="tool-source-toggle" role="group" data-i18n-aria-label="settings.toolSource" aria-label="Tool source">
-            <button id="tool-source-managed" class="segment" type="button" data-tool-source="managed" data-i18n="settings.managedTools">Managed</button>
-            <button id="tool-source-local" class="segment" type="button" data-tool-source="local" data-i18n="settings.localTools">Local</button>
-          </div>
-        </div>
-        <div id="managed-toolchain-details">
-          <p id="tool-root" class="path-text">Resolving tools path...</p>
-          <p class="toolchain-revision">
-            <span data-i18n="settings.activeRevision">Active revision</span>
-            <code id="toolchain-revision">None</code>
-          </p>
-        </div>
-        <div id="local-toolchain-paths" class="local-toolchain-paths" hidden>
-          <ul class="local-path-list">
-            <li>
-              <div class="local-path-copy">
-                <span class="local-path-label">yt-dlp</span>
-                <code id="local-yt-dlp-path">Not detected</code>
-              </div>
-              <button id="choose-local-yt-dlp" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseYtDlp" aria-label="Choose yt-dlp">Choose</button>
-            </li>
-            <li>
-              <div class="local-path-copy">
-                <span class="local-path-label">FFmpeg + FFprobe</span>
-                <code id="local-ffmpeg-path">Not detected</code>
-              </div>
-              <button id="choose-local-ffmpeg" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseFfmpegDirectory" aria-label="Choose FFmpeg directory">Choose</button>
-            </li>
-            <li>
-              <div class="local-path-copy">
-                <span class="local-path-label">Deno</span>
-                <code id="local-deno-path">Not detected</code>
-              </div>
-              <button id="choose-local-deno" class="button secondary compact" type="button" data-i18n="action.choosePath" data-i18n-aria-label="action.chooseDeno" aria-label="Choose Deno">Choose</button>
-            </li>
-          </ul>
-          <button id="auto-detect-local-tools" class="button secondary" type="button" data-i18n="action.usePath">Use PATH</button>
-        </div>
-        <ul id="tool-list" class="tool-list"></ul>
-        <p id="tool-install-status" class="tool-install-status">Install missing tools automatically</p>
-        <div class="tool-actions">
-          <button id="verify-tools" class="button secondary" type="button" data-i18n="action.verifyTools">Verify tools</button>
-          <button id="check-tool-updates" class="button secondary" type="button" data-i18n="action.checkToolUpdates">Check tool updates</button>
-          <button id="install-tools" class="button primary" type="button" data-i18n="action.installTools" hidden>Install tools</button>
-          <button id="reinstall-tools" class="button secondary" type="button" data-i18n="action.reinstallTools">Reinstall tools</button>
-        </div>
-      </section>
-
-      <section class="settings-section" aria-labelledby="events-heading">
-        <div class="settings-section-header">
-          <h3 id="events-heading" data-i18n="settings.activity">Activity</h3>
-          <p data-i18n="settings.activityHint">Recent local events</p>
-        </div>
-        <ul id="events" class="events"></ul>
-      </section>
-
-      <footer class="settings-footer">
-        <div class="settings-footer-main">
-          <div class="settings-version-line">
-            <span data-i18n="settings.version">Version</span>
-            <span id="app-version">0.1.0</span>
-          </div>
-          <div class="settings-footer-actions">
-            <button id="check-updates" class="button secondary" type="button" data-i18n="action.checkUpdates">Check updates</button>
-            <button id="release-link" class="button secondary" type="button" hidden data-i18n="action.openRelease">Open release</button>
-            <button id="release-notes-button" class="button secondary" type="button" data-i18n="action.releaseNotes">Release notes</button>
-            <button id="github-link" class="button secondary" type="button" data-i18n="action.projectHome">Project home</button>
-          </div>
-          <span id="update-status" class="update-status" aria-live="polite"></span>
-        </div>
-      </footer>
-    </aside>
-
     <div id="release-notes-backdrop" class="modal-backdrop" hidden></div>
     <section
       id="release-notes-dialog"
@@ -223,14 +918,33 @@
       <div class="release-notes-header">
         <div>
           <p class="eyebrow" data-i18n="releaseNotes.kicker">Updated</p>
-          <h2 id="release-notes-title" data-i18n="releaseNotes.title">What's new</h2>
+          <h2 id="release-notes-title" data-i18n="releaseNotes.title">
+            What's new
+          </h2>
         </div>
-        <button id="release-notes-close" class="icon-button" type="button" data-i18n-aria-label="action.close" aria-label="Close">×</button>
+        <button
+          id="release-notes-close"
+          class="icon-button"
+          type="button"
+          data-i18n-aria-label="action.close"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </div>
-      <p id="release-notes-version" class="release-notes-version">Version v0.1.0</p>
+      <p id="release-notes-version" class="release-notes-version">
+        Version v0.1.0
+      </p>
       <ul id="release-notes-list" class="release-notes-list"></ul>
       <div class="release-notes-actions">
-        <button id="release-notes-done" class="button primary" type="button" data-i18n="action.done">Done</button>
+        <button
+          id="release-notes-done"
+          class="button primary"
+          type="button"
+          data-i18n="action.done"
+        >
+          Done
+        </button>
       </div>
     </section>
   </body>
