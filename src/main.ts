@@ -1068,9 +1068,13 @@ async function parseCurrentUrl() {
   }
 
   setBusy(true, t("progress.parsing"), "metadata");
-  renderEmptyPreview(t("preview.readingMetadata"));
+  invalidateParsedVideo(t("preview.readingMetadata"));
   try {
     const metadata = await invoke<VideoMetadata>("parse_metadata", { url });
+    if (elements.url.value.trim() !== url) {
+      elements.progressText.textContent = t("progress.idle");
+      return;
+    }
     state.metadata = metadata;
     state.lastUrl = url;
     state.selectedFormat = metadata.format_options[0] ?? null;
@@ -1080,7 +1084,11 @@ async function parseCurrentUrl() {
     showNotice(t("notice.metadataParsed"), "success");
     logEvent(t("event.parsed", { title: metadata.title }));
   } catch (error) {
-    renderEmptyPreview(t("preview.parseFailed"));
+    if (elements.url.value.trim() !== url) {
+      elements.progressText.textContent = t("progress.idle");
+      return;
+    }
+    invalidateParsedVideo(t("preview.parseFailed"));
     elements.progressText.textContent = t("progress.metadataFailed");
     showNotice(String(error), "error");
     logEvent(t("event.metadataFailed"));
@@ -1092,7 +1100,7 @@ async function parseCurrentUrl() {
 async function downloadCurrentVideo() {
   const metadata = state.metadata;
   const selectedFormat = state.selectedFormat;
-  const url = state.lastUrl || elements.url.value.trim();
+  const url = state.lastUrl;
   if (!metadata || !selectedFormat || !url || state.busy) {
     return;
   }
@@ -1333,6 +1341,7 @@ function invalidateParsedVideo(message: string) {
   state.lastUrl = "";
   renderEmptyPreview(message);
   renderQualityOptions([]);
+  updateButtons();
 }
 
 function renderThumbnailCandidates(urls: string[]) {
@@ -1464,7 +1473,9 @@ function applyToolSummary(
     mode === "remote"
       ? summarizeRemoteTools(tools, state.toolchainRevision, options.remoteRevision ?? null)
       : summarizeTools(tools, mode);
-  state.toolsReady = summary.ready;
+  if (mode !== "remote") {
+    state.toolsReady = summary.ready;
+  }
   state.toolAction = summary.action;
   renderTools(tools);
   updateToolActionButton();

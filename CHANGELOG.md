@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### 中文
+
+- 修复修改 URL 或重新解析失败后仍可使用旧下载状态的问题；工具更新提示不再禁用当前可用工具链。
+
+### English
+
+- Discard stale video previews after URL changes or failed parsing, and keep the current working toolchain usable when an update is available.
+
 ## 0.1.13 - 2026-07-14
 
 ### 中文
