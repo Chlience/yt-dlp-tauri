@@ -1,6 +1,66 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createApp, deferred, flush, healthyTools, video } from "./helpers/app-harness.ts";
+import { createApp, deferred, flush, healthyTools, managedAppState, video } from "./helpers/app-harness.ts";
+
+test("startup errors are visible and retry loads configuration before enabling operations", async () => {
+  let fail = true;
+  const app = await createApp({ get_app_state: () => {
+    if (fail) throw new Error("Invalid Cookie selection");
+    return managedAppState;
+  } });
+  app.input(video.webpage_url);
+  assert.equal(app.el("retry-startup").hidden, false);
+  assert.equal(app.el("parse").disabled, true);
+  assert.equal(app.el("save-folder").disabled, true);
+  assert.match(app.el("progress-text").textContent, /Invalid Cookie selection/u);
+  assert.equal(app.el("toast-region").children.length, 1);
+  app.el("url").dispatch("keydown", { key: "Enter", preventDefault() {} });
+  assert.deepEqual(app.calls.map(call => call.command), ["get_app_state"]);
+  fail = false;
+  await app.click("retry-startup");
+  assert.equal(app.el("retry-startup").hidden, true);
+  assert.equal(app.el("parse").disabled, false);
+  assert.equal(app.el("save-folder").disabled, false);
+  assert.deepEqual(app.calls.map(call => call.command), ["get_app_state", "get_app_state", "check_tools"]);
+  await app.click("parse");
+  assert.equal(app.el("download").disabled, false);
+});
+
+for (const [name, availability, button, command] of [
+  ["install", "missing", "install-tools", "install_tools"],
+  ["repair", "outdated", "install-tools", "reinstall_tools"],
+  ["manual reinstall", "available", "reinstall-tools", "reinstall_tools"],
+]) {
+  test(`${name} reports success once and restores the controls`, async () => {
+    const app = await createApp({
+      check_tools: () => healthyTools.map(tool => ({ ...tool, availability })),
+      [command]: () => healthyTools,
+    });
+    app.el("toast-region").replaceChildren();
+    app.input(video.webpage_url);
+    await app.click(button);
+    assert.equal(app.calls.filter(call => call.command === command).length, 1);
+    const notices = app.el("toast-region").children;
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].children[1].textContent, "Toolchain installed");
+    assert.equal(app.el("parse").disabled, false);
+    assert.equal(app.el("verify-tools").disabled, false);
+  });
+}
+
+test("failed installation reports one error and keeps missing tools unavailable", async () => {
+  const app = await createApp({
+    check_tools: () => healthyTools.map(tool => ({ ...tool, availability: "missing" })),
+    install_tools: () => { throw new Error("Tool download failed"); },
+  });
+  app.el("toast-region").replaceChildren();
+  app.input(video.webpage_url);
+  await app.click("install-tools");
+  assert.equal(app.el("toast-region").children.length, 1);
+  assert.match(app.el("tool-install-status").textContent, /Tool download failed/u);
+  assert.equal(app.el("parse").disabled, true);
+  assert.equal(app.el("install-tools").disabled, false);
+});
 
 test("changing the URL discards a pending parse result and keeps download disabled", async () => {
   const parse = deferred<typeof video>();

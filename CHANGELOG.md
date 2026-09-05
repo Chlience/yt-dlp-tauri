@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 ### 中文
 
+- 启动失败时显示具体错误并支持重试；安装和重装仅显示一次结果通知。
+- 拆分翻译和工具链设置模块，清理未使用文案及重复校验，让 manifest 选择测试覆盖生产逻辑。
 - 修复修改 URL 或重新解析失败后仍可使用旧下载状态的问题；工具更新提示不再禁用当前可用工具链。
 - 已激活工具链缺少可执行文件时仍可检查并重装；受管工具在版本探测前先校验 SHA-256。
 - 一行 Cookie 绑定选择文件时的精确 URL 来源，跨站需重新选择；Netscape 文件继续使用自身域名规则。
@@ -13,6 +15,8 @@ All notable changes to this project will be documented in this file.
 
 ### English
 
+- Display startup errors with a retry action, and report installation and reinstallation results once.
+- Separate translations and toolchain settings, remove unused messages and redundant validation, and exercise production manifest selection in tests.
 - Discard stale video previews after URL changes or failed parsing, and keep the current working toolchain usable when an update is available.
 - Allow verification and reinstallation when an active toolchain is missing an executable, and verify managed executable hashes before running version probes.
 - Bind one-line Cookie headers to the exact URL origin selected by the user, requiring reselection across origins while preserving Netscape domain rules.

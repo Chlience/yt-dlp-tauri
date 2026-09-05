@@ -37,6 +37,7 @@ The project is desktop-first and local-first. It is not a hosted downloader serv
 - Parse video metadata through `yt-dlp` and preview title, thumbnail, duration, source URL, description, and quality options.
 - Cancel metadata parsing at any time; parsing also stops automatically after 120 seconds.
 - Download with live progress, speed, ETA, cancellation, and a saved output folder.
+- Show configuration errors during startup and retry initialization after the reported problem is corrected.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
 - Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
 - Switch between the app-managed toolchain and trusted local tools discovered from `PATH` or selected by absolute path.

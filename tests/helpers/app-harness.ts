@@ -1,10 +1,7 @@
 import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { createContext, runInContext } from "node:vm";
 import ts from "typescript";
-import * as releaseNotes from "../../src/release-notes.ts";
-import * as thumbnail from "../../src/thumbnail.ts";
-import * as toolchain from "../../src/toolchain.ts";
-import * as updateCheck from "../../src/update-check.ts";
 
 // Exercise the application through DOM events and IPC, without exporting its state for tests.
 class Element {
@@ -74,6 +71,11 @@ export const video = {
   format_options: [{ label: "Best MP4", format_selector: "b", extension: "mp4", is_best: true }],
 };
 
+export const managedAppState = {
+  download_directory: "/downloads", tools_root: "/tools", toolchain_revision: "20260711.1",
+  toolchain_source: "managed", local_toolchain: { schemaVersion: 1 }, local_toolchain_paths: {}, cookies_file: null,
+};
+
 type Handler = (args: any) => unknown;
 export async function createApp(handlers: Record<string, Handler> = {}) {
   const nodes = new Map<string, Element>();
@@ -81,10 +83,7 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
     nodes.set(`#${match[1]}`, new Element());
   }
   const defaults: Record<string, Handler> = {
-    get_app_state: () => ({
-      download_directory: "/downloads", tools_root: "/tools", toolchain_revision: "20260711.1",
-      toolchain_source: "managed", local_toolchain: { schemaVersion: 1 }, local_toolchain_paths: {}, cookies_file: null,
-    }),
+    get_app_state: () => managedAppState,
     check_tools: () => healthyTools,
     parse_metadata: () => video,
     download_video: () => "/downloads/video.mp4",
@@ -93,27 +92,19 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
   const listeners = new Map<string, (event: unknown) => void>();
   const modules: Record<string, unknown> = {
     "@tauri-apps/api/core": { invoke: async (command: string, args: unknown) => {
-      calls.push({ command, args });
+      const payload = structuredClone(args);
+      calls.push({ command, args: payload });
       const handler = handlers[command] ?? defaults[command];
       if (!handler) throw new Error(`Unexpected command: ${command}`);
-      return handler(args);
+      return handler(payload);
     } },
     "@tauri-apps/api/event": { listen: async () => () => {} },
     "@tauri-apps/plugin-dialog": { open: async () => handlers.open?.({}) ?? null },
     "@tauri-apps/plugin-opener": { openUrl: async () => {} },
     "../CHANGELOG.md?raw": readFileSync("CHANGELOG.md", "utf8"),
     "../package.json": JSON.parse(readFileSync("package.json", "utf8")),
-    "./release-notes": releaseNotes,
-    "./thumbnail": thumbnail,
-    "./toolchain": toolchain,
-    "./update-check": updateCheck,
   };
   const context = createContext({
-    exports: {},
-    require: (name: string) => {
-      if (!(name in modules)) throw new Error(`Unexpected module: ${name}`);
-      return modules[name];
-    },
     document: {
       querySelector: (selector: string) => nodes.get(selector) ?? null,
       querySelectorAll: () => [],
@@ -128,10 +119,24 @@ export async function createApp(handlers: Record<string, Handler> = {}) {
     navigator: { language: "en" },
     localStorage: { getItem: () => null, setItem() {} },
   });
-  const script = ts.transpileModule(readFileSync("src/main.ts", "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-  }).outputText;
-  runInContext(script, context, { filename: "main.js" });
+  const loaded = new Map<string, { exports: unknown }>();
+  function loadModule(file: string): unknown {
+    const cached = loaded.get(file);
+    if (cached) return cached.exports;
+    const module = { exports: {} };
+    loaded.set(file, module);
+    const script = ts.transpileModule(readFileSync(file, "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+    }).outputText;
+    const execute = runInContext(`(function(require, module, exports) {\n${script}\n})`, context, { filename: file });
+    execute((name: string) => {
+      if (name in modules) return modules[name];
+      if (name.startsWith("./")) return loadModule(resolve(dirname(file), `${name}.ts`));
+      throw new Error(`Unexpected module: ${name}`);
+    }, module, module.exports);
+    return module.exports;
+  }
+  loadModule(resolve("src/main.ts"));
   listeners.get("DOMContentLoaded")!({});
   await flush();
   return {
