@@ -317,6 +317,11 @@ mod tests {
                 thread::sleep(Duration::from_secs(30));
             }
             "descendant" => {
+                // Deliberately exit first: the runner must clean a descendant holding its pipes.
+                #[expect(
+                    clippy::zombie_processes,
+                    reason = "fixture exercises parent exit before its descendant"
+                )]
                 let _child = fixture("sleep").spawn().unwrap();
                 println!("fixture-descendant-started");
             }

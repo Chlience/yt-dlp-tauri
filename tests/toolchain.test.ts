@@ -92,3 +92,11 @@ test("new archive revision updates matching installed bytes", () => {
     summarizeRemoteTools([tool("missing")], null, "20261301.1"),
   );
 });
+
+test("remote summaries reject invalid provided revisions even when tools need installation", () => {
+  for (const revision of ["", "20261301.1", "20260712.4294967296"]) {
+    assert.throws(() => summarizeRemoteTools([tool("missing")], revision, "20260712.1"));
+    assert.throws(() => summarizeRemoteTools([tool("missing")], null, revision));
+  }
+  assert.equal(summarizeRemoteTools([tool("available")], null, null).action, null);
+});

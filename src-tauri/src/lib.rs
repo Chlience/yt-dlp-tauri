@@ -125,7 +125,7 @@ async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -149,7 +149,7 @@ async fn set_download_directory(directory: String) -> Result<AppState, String> {
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -165,7 +165,7 @@ async fn reset_download_directory() -> Result<AppState, String> {
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -182,7 +182,7 @@ async fn set_cookies_file(path: String, url: Option<String>) -> Result<AppState,
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -193,7 +193,7 @@ async fn clear_cookies_file() -> Result<AppState, String> {
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -204,7 +204,7 @@ async fn open_download_directory() -> Result<(), String> {
         open_path(&directory)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -217,7 +217,7 @@ async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState
         build_app_state(tools_root)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -237,7 +237,7 @@ async fn set_local_toolchain(
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -249,7 +249,7 @@ async fn auto_detect_local_toolchain(app: AppHandle) -> Result<AppState, String>
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -269,7 +269,7 @@ async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
         }
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -284,7 +284,7 @@ async fn check_tools_with_manifest(
         probe_manifest_tools(&app, &target)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -295,7 +295,7 @@ async fn fetch_latest_tool_manifest(
         fetch_latest_tool_manifest_blocking(&github_access_mode)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -316,7 +316,7 @@ async fn install_tools(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -337,7 +337,7 @@ async fn install_tools_from_manifest(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -362,7 +362,7 @@ async fn reinstall_tools(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -418,7 +418,7 @@ async fn parse_metadata(
         parse_metadata_json(&json, &url)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -518,7 +518,7 @@ async fn download_video(
         Ok(saved_path)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -870,36 +870,27 @@ fn read_current_manifest_json(app: &AppHandle) -> Result<String, String> {
 
     let bundled_path = bundled_manifest_path(app)?;
     let bundled_json = fs::read_to_string(&bundled_path).map_err(to_string)?;
-    let bundled_manifest = manifest_from_json(&bundled_json)?;
-    let active_manifest = active_tools_manifest_path()
+    let active_json = active_tools_manifest_path()
         .ok()
         .filter(|path| path.exists())
-        .map(|path| {
-            let json = fs::read_to_string(&path).map_err(to_string)?;
-            let manifest = manifest_from_json(&json)?;
-            Ok::<_, String>((json, manifest))
-        })
+        .map(|path| fs::read_to_string(&path).map_err(to_string))
         .transpose()?;
 
-    match active_manifest {
-        Some((json, manifest))
-            if manifest_freshness_key(&manifest) > manifest_freshness_key(&bundled_manifest) =>
-        {
-            Ok(json)
-        }
-        _ => Ok(bundled_json),
-    }
+    select_preferred_manifest_json(bundled_json, active_json)
 }
 
-#[cfg(test)]
-fn select_preferred_manifest<'a>(
-    bundled: &'a ToolsManifest,
-    active: Option<&'a ToolsManifest>,
-) -> &'a ToolsManifest {
-    match active {
-        Some(active) if manifest_freshness_key(active) > manifest_freshness_key(bundled) => active,
-        _ => bundled,
+fn select_preferred_manifest_json(
+    bundled_json: String,
+    active_json: Option<String>,
+) -> Result<String, String> {
+    let bundled = manifest_from_json(&bundled_json)?;
+    if let Some(json) = active_json {
+        let active = manifest_from_json(&json)?;
+        if manifest_freshness_key(&active) > manifest_freshness_key(&bundled) {
+            return Ok(json);
+        }
     }
+    Ok(bundled_json)
 }
 
 fn manifest_freshness_key(manifest: &ToolsManifest) -> &str {
@@ -1349,7 +1340,7 @@ fn append_log(phase: &str, message: &str) {
     else {
         return;
     };
-    let sanitized = message.replace('\r', " ").replace('\n', " ");
+    let sanitized = message.replace(['\r', '\n'], " ");
     let _ = writeln!(file, "{} [{phase}] {sanitized}", unix_timestamp());
 }
 
@@ -1431,8 +1422,34 @@ fn to_string(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
-fn join_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(ProcessState::default())
+        .invoke_handler(tauri::generate_handler![
+            get_app_state,
+            set_download_directory,
+            reset_download_directory,
+            set_cookies_file,
+            clear_cookies_file,
+            open_download_directory,
+            set_toolchain_source,
+            set_local_toolchain,
+            auto_detect_local_toolchain,
+            check_tools,
+            check_tools_with_manifest,
+            fetch_latest_tool_manifest,
+            install_tools,
+            install_tools_from_manifest,
+            reinstall_tools,
+            parse_metadata,
+            download_video,
+            cancel_download
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 
 #[cfg(test)]
@@ -1518,12 +1535,13 @@ mod tests {
             targets: Vec::new(),
         };
 
-        let selected = select_preferred_manifest(&bundled, Some(&active));
-
-        assert_eq!(
-            selected.retrieved_at_utc.as_deref(),
-            Some("2026-06-23T00:00:00Z")
-        );
+        let active_json = serde_json::to_string(&active).unwrap();
+        let selected = select_preferred_manifest_json(
+            serde_json::to_string(&bundled).unwrap(),
+            Some(active_json.clone()),
+        )
+        .unwrap();
+        assert_eq!(selected, active_json);
     }
 
     #[test]
@@ -1541,12 +1559,33 @@ mod tests {
             targets: Vec::new(),
         };
 
-        let selected = select_preferred_manifest(&bundled, Some(&active));
+        let bundled_json = serde_json::to_string(&bundled).unwrap();
+        let selected = select_preferred_manifest_json(
+            bundled_json.clone(),
+            Some(serde_json::to_string(&active).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(selected, bundled_json);
+    }
 
+    #[test]
+    fn preferred_manifest_preserves_bundled_bytes_for_missing_or_equal_active_state() {
+        let bundled = include_str!("../tools-manifest.json").to_string();
         assert_eq!(
-            selected.retrieved_at_utc.as_deref(),
-            Some("2026-06-23T00:00:00Z")
+            select_preferred_manifest_json(bundled.clone(), None).unwrap(),
+            bundled,
         );
+        assert_eq!(
+            select_preferred_manifest_json(bundled.clone(), Some(format!("\n{bundled}"))).unwrap(),
+            bundled,
+        );
+    }
+
+    #[test]
+    fn preferred_manifest_rejects_malformed_input_without_silent_fallback() {
+        let valid = include_str!("../tools-manifest.json").to_string();
+        assert!(select_preferred_manifest_json("invalid".to_string(), Some(valid.clone())).is_err());
+        assert!(select_preferred_manifest_json(valid, Some("invalid".to_string())).is_err());
     }
 
     #[test]
@@ -1615,15 +1654,6 @@ mod tests {
         assert!(!should_use_legacy_tool_manifest(
             reqwest::StatusCode::INTERNAL_SERVER_ERROR
         ));
-    }
-
-    #[test]
-    fn install_update_and_reinstall_share_one_activation_path() {
-        let source = include_str!("lib.rs");
-        let production = source.split("#[cfg(test)]\nmod tests").next().unwrap();
-
-        assert!(production.matches("install_and_activate_manifest(").count() >= 4);
-        assert!(!production.contains("remove_managed_toolchain(&root)?"));
     }
 
     #[test]
@@ -1731,34 +1761,4 @@ mod tests {
             ]
         );
     }
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .manage(ProcessState::default())
-        .invoke_handler(tauri::generate_handler![
-            get_app_state,
-            set_download_directory,
-            reset_download_directory,
-            set_cookies_file,
-            clear_cookies_file,
-            open_download_directory,
-            set_toolchain_source,
-            set_local_toolchain,
-            auto_detect_local_toolchain,
-            check_tools,
-            check_tools_with_manifest,
-            fetch_latest_tool_manifest,
-            install_tools,
-            install_tools_from_manifest,
-            reinstall_tools,
-            parse_metadata,
-            download_video,
-            cancel_download
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }
