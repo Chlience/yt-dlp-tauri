@@ -43,6 +43,7 @@ type AppState = {
   local_toolchain: LocalToolchainConfig;
   local_toolchain_paths: LocalToolchainPaths;
   cookies_file?: string | null;
+  cookies_origin?: string | null;
 };
 
 type ToolchainSource = "managed" | "local";
@@ -453,6 +454,7 @@ const state = {
   updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
   githubAccessMode: resolveInitialGithubAccessMode(),
   cookiesFile: null as string | null,
+  cookiesOrigin: null as string | null,
   language: resolveInitialLanguage(),
   releaseNotesOpen: false,
   thumbnailCandidates: [] as string[],
@@ -604,7 +606,7 @@ function applyTranslations() {
   if (state.updateStatus) {
     renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
   }
-  renderCookiesFile(state.cookiesFile);
+  renderCookiesFile(state.cookiesFile, state.cookiesOrigin);
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
@@ -797,7 +799,7 @@ function applyAppState(appState: AppState) {
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
-  renderCookiesFile(appState.cookies_file ?? null);
+  renderCookiesFile(appState.cookies_file ?? null, appState.cookies_origin ?? null);
 }
 
 async function setToolchainSource(source: ToolchainSource) {
@@ -1278,6 +1280,8 @@ async function chooseCookiesFile() {
     return;
   }
 
+  const url = elements.url.value.trim();
+  setBusy(true);
   try {
     const selected = await open({
       title: t("cookies.chooseFile"),
@@ -1287,14 +1291,16 @@ async function chooseCookiesFile() {
     });
 
     if (typeof selected === "string") {
-      const appState = await invoke<AppState>("set_cookies_file", { path: selected });
-      renderCookiesFile(appState.cookies_file ?? null);
+      const appState = await invoke<AppState>("set_cookies_file", { path: selected, url });
+      renderCookiesFile(appState.cookies_file ?? null, appState.cookies_origin ?? null);
       invalidateParsedVideo(t("preview.cookiesChanged"));
       showNotice(t("notice.cookiesUpdated"), "success");
       logEvent(t("event.cookiesUpdated", { file: fileNameFromPath(appState.cookies_file || selected) }));
     }
   } catch (error) {
     showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1303,6 +1309,7 @@ async function clearCookiesFile() {
     return;
   }
 
+  setBusy(true);
   try {
     const appState = await invoke<AppState>("clear_cookies_file");
     renderCookiesFile(appState.cookies_file ?? null);
@@ -1311,6 +1318,8 @@ async function clearCookiesFile() {
     logEvent(t("event.cookiesCleared"));
   } catch (error) {
     showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1571,10 +1580,15 @@ function toolActionStatusKey(action: ToolAction | null): TranslationKey {
   return "settings.installingTools";
 }
 
-function renderCookiesFile(file: string | null) {
+function renderCookiesFile(file: string | null, origin: string | null = null) {
   state.cookiesFile = file?.trim() || null;
-  elements.cookiesFile.textContent = state.cookiesFile ? fileNameFromPath(state.cookiesFile) : t("cookies.none");
-  elements.cookiesFile.title = state.cookiesFile || t("cookies.none");
+  state.cookiesOrigin = origin;
+  elements.cookiesFile.textContent = state.cookiesFile
+    ? [fileNameFromPath(state.cookiesFile), origin].filter(Boolean).join(" · ")
+    : t("cookies.none");
+  elements.cookiesFile.title = state.cookiesFile
+    ? [state.cookiesFile, origin].filter(Boolean).join("\n")
+    : t("cookies.none");
   updateButtons();
 }
 

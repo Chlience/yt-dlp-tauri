@@ -14,6 +14,9 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 
+mod cookies;
+use cookies::PreparedCookiesFile;
+
 pub mod toolchain;
 
 use toolchain::{
@@ -38,7 +41,6 @@ const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_PROXY_URL_PREFIX: &str = "https://gh-proxy.com/";
 const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
-const COOKIE_HEADER_EXPIRY: &str = "2147483647";
 const TOOLCHAIN_SOURCE_FILE: &str = "toolchain-source.txt";
 const LOCAL_TOOLCHAIN_CONFIG_FILE: &str = "local-toolchain.json";
 #[cfg(windows)]
@@ -53,6 +55,7 @@ struct AppState {
     local_toolchain: LocalToolchainConfig,
     local_toolchain_paths: LocalToolchainPaths,
     cookies_file: Option<String>,
+    cookies_origin: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,25 +126,6 @@ struct DownloadProcessState {
     cancel_requested: Arc<Mutex<bool>>,
 }
 
-struct PreparedCookiesFile {
-    path: PathBuf,
-    temporary: bool,
-}
-
-impl PreparedCookiesFile {
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for PreparedCookiesFile {
-    fn drop(&mut self) {
-        if self.temporary {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
 #[tauri::command]
 async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -194,22 +178,15 @@ async fn reset_download_directory() -> Result<AppState, String> {
 }
 
 #[tauri::command]
-async fn set_cookies_file(path: String) -> Result<AppState, String> {
+async fn set_cookies_file(path: String, url: Option<String>) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let trimmed = path.trim();
         if trimmed.is_empty() {
             return Err("Cookie file cannot be empty.".to_string());
         }
 
-        let path = PathBuf::from(trimmed);
-        validate_cookies_file_path(&path)?;
-        let state_dir = state_directory()?;
-        fs::create_dir_all(&state_dir).map_err(to_string)?;
-        fs::write(
-            state_dir.join("cookies-file.txt"),
-            path.display().to_string(),
-        )
-        .map_err(to_string)?;
+        let selection = cookies::select(PathBuf::from(trimmed), url.as_deref().unwrap_or(""))?;
+        cookies::save_selection(&state_directory()?, Some(&selection))?;
 
         build_app_state(String::new())
     })
@@ -220,10 +197,7 @@ async fn set_cookies_file(path: String) -> Result<AppState, String> {
 #[tauri::command]
 async fn clear_cookies_file() -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let state_file = cookies_file_state_path()?;
-        if state_file.exists() {
-            fs::remove_file(state_file).map_err(to_string)?;
-        }
+        cookies::save_selection(&state_directory()?, None)?;
 
         build_app_state(String::new())
     })
@@ -1308,6 +1282,7 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         ffmpeg_directory,
         deno_path: local_resolution.deno,
     };
+    let cookies = cookies::read_selection(&state_directory()?)?;
     Ok(AppState {
         download_directory: download_directory()?.display().to_string(),
         tools_root,
@@ -1316,7 +1291,8 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         toolchain_source,
         local_toolchain,
         local_toolchain_paths,
-        cookies_file: cookies_file()?.map(|path| path.display().to_string()),
+        cookies_file: cookies.as_ref().map(|selection| selection.path.display().to_string()),
+        cookies_origin: cookies.and_then(|selection| selection.origin),
     })
 }
 
@@ -1367,248 +1343,16 @@ fn download_directory() -> Result<PathBuf, String> {
     Ok(default_download_directory())
 }
 
-fn cookies_file() -> Result<Option<PathBuf>, String> {
-    let configured = cookies_file_state_path()?;
-    if configured.exists() {
-        let value = fs::read_to_string(configured).map_err(to_string)?;
-        let value = value.trim();
-        if !value.is_empty() {
-            return Ok(Some(PathBuf::from(value)));
-        }
-    }
-
-    Ok(None)
-}
-
 fn prepared_cookies_file_for_url(url: &str) -> Result<Option<PreparedCookiesFile>, String> {
-    let Some(path) = cookies_file()? else {
-        return Ok(None);
-    };
-
-    prepare_cookies_file_path_for_url(&path, url).map(Some)
-}
-
-fn validate_cookies_file_path(path: &Path) -> Result<(), String> {
-    if !path.is_file() {
-        return Err(format!("Cookie file does not exist: {}", path.display()));
-    }
-
-    fs::File::open(path)
-        .map(|_| ())
-        .map_err(|error| format!("Cookie file cannot be opened: {}: {error}", path.display()))
-}
-
-fn prepare_cookies_file_path_for_url(
-    path: &Path,
-    url: &str,
-) -> Result<PreparedCookiesFile, String> {
-    validate_cookies_file_path(path)?;
-    let content = fs::read_to_string(path).map_err(|error| {
-        format!(
-            "Cookie file cannot be read as text: {}: {error}",
-            path.display()
-        )
-    })?;
-
-    if is_netscape_cookie_content(&content) {
-        return Ok(PreparedCookiesFile {
-            path: path.to_path_buf(),
-            temporary: false,
-        });
-    }
-
-    if !looks_like_cookie_header_content(&content) {
-        return Err(
-            "Cookie file must be Netscape cookies.txt or a one-line Cookie header such as `a=b; c=d`."
-                .to_string(),
-        );
-    }
-
-    let converted = cookie_header_to_netscape_content(url, &content)?;
-    let converted_path = temp_cookies_file_path();
-    fs::write(&converted_path, converted).map_err(|error| {
-        format!(
-            "Failed to prepare temporary Cookie header file at {}: {error}",
-            converted_path.display()
-        )
-    })?;
-
-    Ok(PreparedCookiesFile {
-        path: converted_path,
-        temporary: true,
-    })
-}
-
-fn cookies_file_state_path() -> Result<PathBuf, String> {
-    Ok(state_directory()?.join("cookies-file.txt"))
+    cookies::read_selection(&state_directory()?)?
+        .map(|selection| cookies::prepare(&selection, url))
+        .transpose()
 }
 
 fn yt_dlp_cookie_args(cookies_file: Option<&Path>) -> Vec<String> {
     cookies_file
         .map(|path| vec!["--cookies".to_string(), path.display().to_string()])
         .unwrap_or_default()
-}
-
-fn is_netscape_cookie_content(content: &str) -> bool {
-    content.lines().any(|line| {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return false;
-        }
-
-        line.split('\t').count() == 7
-    })
-}
-
-fn looks_like_cookie_header_content(content: &str) -> bool {
-    parse_cookie_header_pairs(content)
-        .map(|pairs| !pairs.is_empty())
-        .unwrap_or(false)
-}
-
-fn cookie_header_to_netscape_content(url: &str, content: &str) -> Result<String, String> {
-    let (domain, include_subdomains) = cookie_domain_for_url(url)?;
-    let include_subdomains = if include_subdomains { "TRUE" } else { "FALSE" };
-    let secure = if url.starts_with("https://") {
-        "TRUE"
-    } else {
-        "FALSE"
-    };
-    let pairs = parse_cookie_header_pairs(content)?;
-    if pairs.is_empty() {
-        return Err("Cookie header file does not contain any cookie pairs.".to_string());
-    }
-
-    let mut lines = vec![
-        "# Netscape HTTP Cookie File".to_string(),
-        "# Generated by yt-dlp-tauri from a Cookie header file.".to_string(),
-    ];
-
-    for (name, value) in pairs {
-        lines.push(format!(
-            "{domain}\t{include_subdomains}\t/\t{secure}\t{COOKIE_HEADER_EXPIRY}\t{name}\t{value}"
-        ));
-    }
-    lines.push(String::new());
-    Ok(lines.join("\n"))
-}
-
-fn parse_cookie_header_pairs(content: &str) -> Result<Vec<(String, String)>, String> {
-    let joined = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let header = strip_cookie_header_prefix(&joined).trim();
-    if !header.contains('=') {
-        return Err("Cookie header file does not contain `name=value` pairs.".to_string());
-    }
-
-    let mut pairs = Vec::new();
-    for part in header.split(';') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        let Some((name, value)) = part.split_once('=') else {
-            return Err(format!("Cookie header entry is missing `=`: {part}"));
-        };
-        let name = name.trim();
-        if name.is_empty() || !is_safe_cookie_field(name) {
-            return Err(format!(
-                "Cookie header contains an invalid cookie name: {name}"
-            ));
-        }
-        if !is_safe_cookie_field(value) {
-            return Err(format!(
-                "Cookie header contains an invalid value for {name}."
-            ));
-        }
-
-        pairs.push((name.to_string(), value.trim().to_string()));
-    }
-
-    Ok(pairs)
-}
-
-fn strip_cookie_header_prefix(content: &str) -> &str {
-    let trimmed = content.trim_start();
-    if trimmed
-        .get(..7)
-        .map(|prefix| prefix.eq_ignore_ascii_case("cookie:"))
-        .unwrap_or(false)
-    {
-        &trimmed[7..]
-    } else {
-        trimmed
-    }
-}
-
-fn is_safe_cookie_field(value: &str) -> bool {
-    !value
-        .chars()
-        .any(|character| character == '\t' || character == '\r' || character == '\n')
-}
-
-fn cookie_domain_for_url(url: &str) -> Result<(String, bool), String> {
-    let host = http_url_host(url)
-        .ok_or_else(|| "Unable to determine host for Cookie header conversion.".to_string())?;
-    if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
-        return Ok((host, false));
-    }
-
-    let labels = host
-        .split('.')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if labels.len() < 2 {
-        return Ok((host, false));
-    }
-
-    let base = if labels.len() > 2 && labels.first().is_some_and(|label| *label == "www") {
-        labels[1..].join(".")
-    } else if labels.len() > 2 {
-        labels[labels.len() - 2..].join(".")
-    } else {
-        host
-    };
-
-    Ok((format!(".{base}"), true))
-}
-
-fn http_url_host(url: &str) -> Option<String> {
-    let (_, rest) = url.split_once("://")?;
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .rsplit('@')
-        .next()
-        .unwrap_or_default();
-    if authority.starts_with('[') {
-        return authority
-            .split_once(']')
-            .map(|(host, _)| host.trim_start_matches('[').to_ascii_lowercase());
-    }
-
-    authority
-        .split(':')
-        .next()
-        .filter(|host| !host.trim().is_empty())
-        .map(|host| host.trim().to_ascii_lowercase())
-}
-
-fn temp_cookies_file_path() -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    env::temp_dir().join(format!(
-        "yt-dlp-tauri-cookies-{}-{stamp}.txt",
-        std::process::id()
-    ))
 }
 
 fn default_download_directory() -> PathBuf {
@@ -1761,12 +1505,7 @@ fn background_command(program: impl AsRef<OsStr>) -> Command {
 }
 
 fn validate_http_url(url: &str) -> Result<(), String> {
-    let trimmed = url.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        Ok(())
-    } else {
-        Err("Enter a valid http or https video URL.".to_string())
-    }
+    cookies::http_url(url).map(|_| ())
 }
 
 fn first_line(bytes: &[u8]) -> Option<String> {
@@ -2042,50 +1781,6 @@ mod tests {
             args,
             vec!["--cookies".to_string(), "account-cookies.txt".to_string()]
         );
-    }
-
-    #[test]
-    fn converts_cookie_header_file_content_to_netscape_cookie_content() {
-        let content = cookie_header_to_netscape_content(
-            "https://www.bilibili.com/video/BV1test",
-            "Cookie: buvid3=abc; bili_jct=token_value; CURRENT_FNVAL=2000",
-        )
-        .expect("cookie header should convert");
-
-        assert_eq!(
-            content,
-            [
-                "# Netscape HTTP Cookie File",
-                "# Generated by yt-dlp-tauri from a Cookie header file.",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbuvid3\tabc",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbili_jct\ttoken_value",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tCURRENT_FNVAL\t2000",
-                "",
-            ]
-            .join("\n")
-        );
-    }
-
-    #[test]
-    fn converts_bare_cookie_header_file_content_to_netscape_cookie_content() {
-        let content = cookie_header_to_netscape_content(
-            "https://www.bilibili.com/video/BV1test",
-            "buvid3=abc; bili_jct=token_value",
-        )
-        .expect("bare cookie header should convert");
-
-        assert!(content.contains(".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbuvid3\tabc"));
-        assert!(content.contains(".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbili_jct\ttoken_value"));
-    }
-
-    #[test]
-    fn detects_netscape_cookie_content() {
-        assert!(is_netscape_cookie_content(
-            "# Netscape HTTP Cookie File\n.bilibili.com\tTRUE\t/\tFALSE\t0\tbuvid3\tabc\n"
-        ));
-        assert!(!is_netscape_cookie_content(
-            "buvid3=abc; bili_jct=token_value"
-        ));
     }
 
     #[test]

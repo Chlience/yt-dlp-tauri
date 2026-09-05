@@ -118,6 +118,12 @@ src-tauri\target\release\bundle\nsis\
 - 支持的工具 target：`win-x64`。
 - 仓库不提交工具二进制。
 
+## Cookie 文件
+
+Netscape `cookies.txt` 文件保留自身的域名规则。一行 Cookie 请求头需要先粘贴视频 URL，再选择文件；选择结果绑定该 URL 的精确来源（协议、主机名和端口），并在文件名旁显示。切换来源时，需要重新选择适用文件或清除选择。升级前已选择的一行 Cookie 需要重新选择一次，应用不会自动绑定站点。
+
+文件路径和可选来源一起保存在 `%LOCALAPPDATA%\yt-dlp-tauri\state\cookies-file.json`。保存或清除选择前，仍可读取旧版 `cookies-file.txt` 配置。转换后的临时 Cookie 使用精确主机名，并在操作结束后移除。
+
 ## 本地工具模式
 
 Settings 可将完整工具链切换为 `应用管理` 或 `本地工具`。本地模式会在当前进程的 `PATH` 中查找 `yt-dlp.exe`、`deno.exe`，并查找同时包含 `ffmpeg.exe` 和 `ffprobe.exe` 的目录。工具不在 `PATH` 中时，可以分别选择 yt-dlp 可执行文件、FFmpeg 目录和 Deno 可执行文件的绝对路径。`使用 PATH` 会清除这些覆盖路径，再次从 `PATH` 解析全部工具。

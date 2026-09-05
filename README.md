@@ -118,6 +118,12 @@ Current release scope:
 - Supported tool target: `win-x64`.
 - Tool binaries are not committed to the repository.
 
+## Cookie files
+
+Netscape `cookies.txt` files retain their own domain rules. For a one-line Cookie header, paste the video URL before selecting the file. The selection is bound to that exact origin (scheme, hostname, and port), shown beside the filename. To use a header on another origin, select the appropriate file again or clear the selection. Existing header selections must be selected once again after upgrading; they are never bound automatically.
+
+The path and optional origin are stored together in `%LOCALAPPDATA%\yt-dlp-tauri\state\cookies-file.json`. Existing `cookies-file.txt` selections remain readable until a selection is saved or cleared. Temporary converted headers use the exact hostname and are removed after the operation.
+
 ## Local Tool Mode
 
 Settings can switch the complete toolchain between `Managed` and `Local`. Local mode searches the current process `PATH` for `yt-dlp.exe`, `deno.exe`, and one directory containing both `ffmpeg.exe` and `ffprobe.exe`. The path controls can select an absolute yt-dlp executable, FFmpeg directory, or Deno executable when a tool is outside `PATH`. `Use PATH` clears those overrides and resolves all tools from `PATH` again.

@@ -70,3 +70,22 @@ test("remote availability does not enable a damaged local toolchain", async () =
   await app.click("check-tool-updates");
   assert.equal(app.el("parse").disabled, true);
 });
+
+test("Cookie selection sends the chosen URL and displays the bound origin", async () => {
+  const selection = deferred<{ cookies_file: string; cookies_origin: string }>();
+  const app = await createApp({
+    open: () => "/cookies/header.txt",
+    set_cookies_file: () => selection.promise,
+  });
+  app.input(video.webpage_url);
+  await app.click("parse");
+  await app.click("choose-cookies");
+  assert.equal(app.el("parse").disabled, true);
+  const command = app.calls.find(call => call.command === "set_cookies_file");
+  assert.equal(command?.args.url, video.webpage_url);
+  selection.resolve({ cookies_file: "/cookies/header.txt", cookies_origin: "https://video.example" });
+  await flush();
+  assert.match(app.el("cookies-file").textContent, /https:\/\/video.example/u);
+  assert.equal(app.el("download").disabled, true);
+  assert.equal(app.el("parse").disabled, false);
+});
