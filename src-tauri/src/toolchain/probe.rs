@@ -3,16 +3,13 @@ use super::{
     ToolStatus,
 };
 use std::{
-    ffi::OsStr,
     fs,
     path::Path,
-    process::{Command, Output, Stdio},
-    thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    process::{Command, Output},
+    sync::atomic::AtomicBool,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const COMBINATION_PROBE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -26,7 +23,7 @@ pub fn probe_target(paths: &ToolPaths, target: &ManifestTarget) -> Result<Vec<To
 
 pub fn require_tools(tools: &ToolPaths) -> Result<(), String> {
     for path in [&tools.yt_dlp, &tools.ffmpeg, &tools.ffprobe, &tools.deno] {
-        if !path.exists() {
+        if !path.is_file() {
             return Err(format!("Missing tool: {}", path.display()));
         }
     }
@@ -49,7 +46,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
 
     let result = (|| {
         let media_path = work_root.join("probe.mp4");
-        let mut ffmpeg = background_command(&paths.ffmpeg);
+        let mut ffmpeg = Command::new(&paths.ffmpeg);
         ffmpeg.args([
             "-hide_banner",
             "-loglevel",
@@ -69,7 +66,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
         ffmpeg.arg(&media_path);
         run_bounded_probe(&mut ffmpeg, "FFmpeg local media probe")?;
 
-        let mut ffprobe = background_command(&paths.ffprobe);
+        let mut ffprobe = Command::new(&paths.ffprobe);
         ffprobe.args([
             "-v",
             "error",
@@ -95,7 +92,7 @@ pub fn verify_toolchain_combination(paths: &ToolPaths) -> Result<(), String> {
                 media_path.display()
             )
         })?;
-        let mut yt_dlp = background_command(&paths.yt_dlp);
+        let mut yt_dlp = Command::new(&paths.yt_dlp);
         yt_dlp.args([
             "--ignore-config",
             "--no-playlist",
@@ -135,41 +132,30 @@ fn run_bounded_probe_with_timeout(
     label: &str,
     timeout: Duration,
 ) -> Result<Output, String> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("Failed to start {label}: {error}"))?;
-    let started = Instant::now();
-    loop {
-        match child
-            .try_wait()
-            .map_err(|error| format!("Failed to poll {label}: {error}"))?
-        {
-            Some(_) => {
-                let output = child
-                    .wait_with_output()
-                    .map_err(|error| format!("Failed to collect {label} output: {error}"))?;
-                if output.status.success() {
-                    return Ok(output);
-                }
-                return Err(process_failure_message(
-                    label,
-                    output.status.code(),
-                    &output.stderr,
-                    &output.stdout,
-                ));
-            }
-            None if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!(
-                    "{label} timed out after {} seconds",
-                    timeout.as_secs()
-                ));
-            }
-            None => thread::sleep(Duration::from_millis(50)),
-        }
+    let mut stdout = Vec::new();
+    let output = crate::process::run(
+        command,
+        label,
+        Some(timeout),
+        &AtomicBool::new(false),
+        |line| {
+            stdout.extend_from_slice(line.as_bytes());
+            stdout.push(b'\n');
+        },
+    )?;
+    if !output.status.success() {
+        return Err(process_failure_message(
+            label,
+            output.status.code(),
+            &output.stderr,
+            &stdout,
+        ));
     }
+    Ok(Output {
+        status: output.status,
+        stdout,
+        stderr: output.stderr,
+    })
 }
 
 fn unique_nonce() -> u128 {
@@ -187,16 +173,9 @@ fn probe_manifest_tool(root: &Path, tool: &ManifestTool) -> Result<ToolStatus, S
         &tool.path,
         &full_path,
         tool_version_args(&tool.name),
+        Some(&tool.sha256),
     );
     status.expected_version = tool.version.clone();
-
-    if status.availability == "available" {
-        let hash_matches = verify_sha256(&full_path, &tool.sha256).is_ok();
-        status.availability = availability_for_manifest_probe(&status.availability, hash_matches);
-        if !hash_matches {
-            status.error = Some("Installed tool does not match the pinned manifest".to_string());
-        }
-    }
     Ok(status)
 }
 
@@ -213,15 +192,8 @@ pub(crate) fn probe_executable(name: &str, full_path: &Path) -> ToolStatus {
         &full_path.display().to_string(),
         full_path,
         tool_version_args(name),
+        None,
     )
-}
-
-fn availability_for_manifest_probe(availability: &str, sha_matches: bool) -> String {
-    if availability == "available" && !sha_matches {
-        "outdated".to_string()
-    } else {
-        availability.to_string()
-    }
 }
 
 fn probe_tool(
@@ -229,53 +201,43 @@ fn probe_tool(
     relative_path: &str,
     full_path: &Path,
     version_args: &[&str],
+    expected_sha256: Option<&str>,
 ) -> ToolStatus {
-    if !full_path.exists() {
-        return ToolStatus {
-            name: name.to_string(),
-            relative_path: relative_path.to_string(),
-            full_path: full_path.display().to_string(),
-            availability: "missing".to_string(),
-            version: None,
-            expected_version: None,
-            error: Some("Tool file is missing".to_string()),
-        };
+    let mut status = ToolStatus {
+        name: name.to_string(),
+        relative_path: relative_path.to_string(),
+        full_path: full_path.display().to_string(),
+        availability: "missing".to_string(),
+        version: None,
+        expected_version: None,
+        error: None,
+    };
+    if !full_path.is_file() {
+        status.error = Some("Tool file is missing".to_string());
+        return status;
+    }
+    if let Some(expected) = expected_sha256 {
+        if let Err(error) = verify_sha256(full_path, expected) {
+            status.availability = "outdated".to_string();
+            status.error = Some(error);
+            return status;
+        }
     }
 
-    let mut command = background_command(full_path);
+    let mut command = Command::new(full_path);
     command.args(version_args);
     let label = format!("{name} version probe at {}", full_path.display());
     match run_bounded_probe_with_timeout(&mut command, &label, VERSION_PROBE_TIMEOUT) {
-        Ok(output) => ToolStatus {
-            name: name.to_string(),
-            relative_path: relative_path.to_string(),
-            full_path: full_path.display().to_string(),
-            availability: "available".to_string(),
-            version: first_line(&output.stdout),
-            expected_version: None,
-            error: None,
+        Ok(output) => {
+            status.availability = "available".to_string();
+            status.version = first_line(&output.stdout);
         },
-        Err(error) => ToolStatus {
-            name: name.to_string(),
-            relative_path: relative_path.to_string(),
-            full_path: full_path.display().to_string(),
-            availability: "cannot_execute".to_string(),
-            version: None,
-            expected_version: None,
-            error: Some(error),
+        Err(error) => {
+            status.availability = "cannot_execute".to_string();
+            status.error = Some(error);
         },
     }
-}
-
-fn background_command(program: impl AsRef<OsStr>) -> Command {
-    #[allow(unused_mut)]
-    let mut command = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    command
+    status
 }
 
 fn first_line(bytes: &[u8]) -> Option<String> {
@@ -303,19 +265,43 @@ mod tests {
     use super::*;
 
     #[test]
-    fn marks_available_tool_outdated_when_manifest_hash_mismatches() {
-        assert_eq!(
-            availability_for_manifest_probe("available", true),
-            "available"
-        );
-        assert_eq!(
-            availability_for_manifest_probe("available", false),
-            "outdated"
-        );
-        assert_eq!(availability_for_manifest_probe("missing", false), "missing");
-        assert_eq!(
-            availability_for_manifest_probe("cannot_execute", false),
-            "cannot_execute"
-        );
+    fn managed_probe_checks_hash_before_execution_and_local_probe_does_not_pin_hash() {
+        let root = std::env::temp_dir().join(format!("yt-dlp-probe-{}-{}", std::process::id(), unique_nonce()));
+        fs::create_dir(&root).unwrap();
+        #[cfg(unix)]
+        let (filename, script) = ("probe", "#!/bin/sh\nprintf executed > \"$0.executed\"\nprintf 'fixture-version\\n'\n");
+        #[cfg(windows)]
+        let (filename, script) = ("probe.cmd", "@echo off\r\necho executed > \"%~f0.executed\"\r\necho fixture-version\r\n");
+        let path = root.join(filename);
+        let marker = root.join(format!("{filename}.executed"));
+        fs::write(&path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let mut tool = ManifestTool {
+            name: "yt-dlp".to_string(), path: format!("Tools/win-x64/{filename}"),
+            source_url: "https://example.test/tool".to_string(), source_size: None, source_sha256: None,
+            version: Some("fixture-version".to_string()), sha256: "0".repeat(64),
+            kind: super::super::ManifestToolKind::File, archive_path_suffix: None, license_notes: None,
+        };
+        let rejected = probe_manifest_tool(&root, &tool).unwrap();
+        assert_eq!(rejected.availability, "outdated");
+        assert!(rejected.error.unwrap().contains("SHA-256 mismatch"));
+        assert!(!marker.exists(), "an unverified executable must not run");
+
+        tool.sha256 = super::super::sha256_bytes(script.as_bytes());
+        let accepted = probe_manifest_tool(&root, &tool).unwrap();
+        assert_eq!(accepted.availability, "available");
+        assert_eq!(accepted.version.as_deref(), Some("fixture-version"));
+        assert!(marker.is_file());
+
+        fs::remove_file(&marker).unwrap();
+        assert_eq!(probe_executable("yt-dlp", &path).availability, "available");
+        assert!(marker.is_file());
+        fs::remove_file(&path).unwrap();
+        assert_eq!(probe_manifest_tool(&root, &tool).unwrap().availability, "missing");
+        fs::remove_dir_all(root).unwrap();
     }
 }

@@ -142,17 +142,13 @@ export function summarizeRemoteTools(
   localRevision: string | null,
   remoteRevision: string | null,
 ): ToolSummary {
-  if (remoteRevision) {
-    compareToolchainRevisions(remoteRevision, remoteRevision);
-  }
-  if (localRevision) {
-    compareToolchainRevisions(localRevision, localRevision);
-  }
+  const remote = remoteRevision === null ? null : parseToolchainRevision(remoteRevision);
+  const local = localRevision === null ? null : parseToolchainRevision(localRevision);
   const summary = summarizeTools(tools, "remote");
-  if (summary.action || !remoteRevision) {
+  if (summary.action || !remote) {
     return summary;
   }
-  const newer = localRevision === null || compareToolchainRevisions(remoteRevision, localRevision) > 0;
+  const newer = local === null || compareParsedRevisions(remote, local) > 0;
   if (!newer) {
     return summary;
   }
@@ -168,18 +164,22 @@ export function summarizeRemoteTools(
 }
 
 export function compareToolchainRevisions(left: string, right: string): -1 | 0 | 1 {
-  const leftParts = parseToolchainRevision(left);
-  const rightParts = parseToolchainRevision(right);
-  if (leftParts.date !== rightParts.date) {
-    return leftParts.date < rightParts.date ? -1 : 1;
-  }
-  if (leftParts.sequence === rightParts.sequence) {
-    return 0;
-  }
-  return leftParts.sequence < rightParts.sequence ? -1 : 1;
+  return compareParsedRevisions(parseToolchainRevision(left), parseToolchainRevision(right));
 }
 
-function parseToolchainRevision(value: string): { date: string; sequence: bigint } {
+type ParsedRevision = { date: string; sequence: bigint };
+
+function compareParsedRevisions(left: ParsedRevision, right: ParsedRevision): -1 | 0 | 1 {
+  if (left.date !== right.date) {
+    return left.date < right.date ? -1 : 1;
+  }
+  if (left.sequence === right.sequence) {
+    return 0;
+  }
+  return left.sequence < right.sequence ? -1 : 1;
+}
+
+function parseToolchainRevision(value: string): ParsedRevision {
   const match = /^(\d{4})(\d{2})(\d{2})\.([1-9]\d*)$/u.exec(value);
   if (!match) {
     throw new Error(`Invalid toolchain revision: ${value}`);

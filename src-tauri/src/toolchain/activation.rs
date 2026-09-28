@@ -1,5 +1,5 @@
 use super::{
-    manifest_target, relative_manifest_tool_path, sha256_bytes, tool_names_for_target,
+    manifest_target, require_tools, sha256_bytes, tool_names_for_target,
     tool_paths_from_manifest, ToolPaths, ToolchainRevision, ToolsManifest, TOOLS_DIRECTORY,
 };
 use serde::{Deserialize, Serialize};
@@ -96,9 +96,15 @@ pub fn active_tool_paths(base: &Path, target: &str) -> Result<Option<ToolPaths>,
     tool_paths_for_state(base, &state).map(Some)
 }
 
+pub(crate) fn read_active_manifest(base: &Path, target: &str) -> Result<Option<String>, String> {
+    read_active_state(base, target)?
+        .map(|state| read_revision_manifest(base, &state).map(|(_, json)| json))
+        .transpose()
+}
+
 pub fn activate_revision(base: &Path, state: &ActiveToolchainState) -> Result<(), String> {
     validate_active_state(state, &state.target)?;
-    let _ = tool_paths_for_state(base, state)?;
+    require_tools(&tool_paths_for_state(base, state)?)?;
 
     let current = read_active_state(base, &state.target)?;
     match (current.as_ref(), state.previous_revision.as_deref()) {
@@ -175,6 +181,16 @@ pub fn activate_revision(base: &Path, state: &ActiveToolchainState) -> Result<()
 }
 
 fn tool_paths_for_state(base: &Path, state: &ActiveToolchainState) -> Result<ToolPaths, String> {
+    let (manifest, _) = read_revision_manifest(base, state)?;
+    let target = manifest_target(&manifest, &state.target)?;
+    let root = revision_root(base, &state.target, &state.revision)?;
+    tool_paths_from_manifest(&root, &target)
+}
+
+fn read_revision_manifest(
+    base: &Path,
+    state: &ActiveToolchainState,
+) -> Result<(ToolsManifest, String), String> {
     let root = revision_root(base, &state.target, &state.revision)?;
     let manifest_path = root.join(REVISION_MANIFEST_FILE);
     let manifest_bytes = fs::read(&manifest_path).map_err(|error| {
@@ -190,34 +206,20 @@ fn tool_paths_for_state(base: &Path, state: &ActiveToolchainState) -> Result<Too
             state.revision, state.manifest_sha256
         ));
     }
-    let manifest_json = std::str::from_utf8(&manifest_bytes).map_err(|error| {
+    let manifest_json = String::from_utf8(manifest_bytes).map_err(|error| {
         format!(
             "Active toolchain manifest at {} is not valid UTF-8: {error}",
             manifest_path.display()
         )
     })?;
-    let manifest: ToolsManifest = super::parse_manifest(manifest_json)?;
+    let manifest = super::parse_manifest(&manifest_json)?;
     if manifest.revision.as_deref() != Some(state.revision.as_str()) {
         return Err(format!(
             "Active toolchain manifest revision does not match {}",
             state.revision
         ));
     }
-    let target = manifest_target(&manifest, &state.target)?;
-    let paths = tool_paths_from_manifest(&root, &target)?;
-    for tool in &target.tools {
-        let path = root.join(relative_manifest_tool_path(tool)?);
-        if !path.is_file() {
-            return Err(format!(
-                "Active toolchain revision {} is incomplete: missing {}/{} at {}",
-                state.revision,
-                state.target,
-                tool.name,
-                path.display()
-            ));
-        }
-    }
-    Ok(paths)
+    Ok((manifest, manifest_json))
 }
 
 fn validate_active_state(state: &ActiveToolchainState, target: &str) -> Result<(), String> {
@@ -438,6 +440,42 @@ mod tests {
             .unwrap()
             .yt_dlp
             .is_file());
+    }
+
+    #[test]
+    fn missing_tools_remain_resolvable_for_repair_but_cannot_be_activated() {
+        let root = TestDirectory::new("missing-tool-repair");
+        let digest = write_complete_revision(root.path(), "20260712.1");
+        let state = ActiveToolchainState::new("win-x64", "20260712.1", &digest, None).unwrap();
+        activate_revision(root.path(), &state).unwrap();
+        let paths = active_tool_paths(root.path(), "win-x64").unwrap().unwrap();
+        fs::remove_file(&paths.deno).unwrap();
+
+        let manifest_json = read_active_manifest(root.path(), "win-x64").unwrap().unwrap();
+        let manifest = super::super::parse_manifest(&manifest_json).unwrap();
+        let target = manifest_target(&manifest, "win-x64").unwrap();
+        let repair_paths = active_tool_paths(root.path(), "win-x64").unwrap().unwrap();
+        let statuses = super::super::probe_target(&repair_paths, &target).unwrap();
+        assert_eq!(statuses.iter().find(|tool| tool.name == "deno").unwrap().availability, "missing");
+        assert!(require_tools(&repair_paths).is_err());
+        assert!(activate_revision(root.path(), &state).unwrap_err().contains("Missing tool"));
+
+        fs::write(&repair_paths.deno, b"repaired").unwrap();
+        let repaired = ActiveToolchainState::new("win-x64", "20260712.1", &digest, Some(state.revision)).unwrap();
+        activate_revision(root.path(), &repaired).unwrap();
+        assert!(active_tool_paths(root.path(), "win-x64").unwrap().unwrap().deno.is_file());
+    }
+
+    #[test]
+    fn repair_manifest_still_requires_the_recorded_digest() {
+        let root = TestDirectory::new("modified-manifest");
+        let digest = write_complete_revision(root.path(), "20260712.1");
+        let state = ActiveToolchainState::new("win-x64", "20260712.1", &digest, None).unwrap();
+        activate_revision(root.path(), &state).unwrap();
+        let manifest_path = revision_root(root.path(), "win-x64", "20260712.1").unwrap().join(REVISION_MANIFEST_FILE);
+        fs::write(manifest_path, "{}").unwrap();
+        assert!(read_active_manifest(root.path(), "win-x64").unwrap_err().contains("SHA-256 mismatch"));
+        assert!(active_tool_paths(root.path(), "win-x64").is_err());
     }
 
     #[test]

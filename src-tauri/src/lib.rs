@@ -2,29 +2,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
-    env,
-    ffi::OsStr,
-    fs,
-    io::{BufRead, BufReader, Write},
+    env, fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{Arc, Mutex},
-    thread,
-    time::{SystemTime, UNIX_EPOCH},
+    process::Command,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager};
+
+mod cookies;
+mod downloads;
+mod playlist;
+mod process;
+mod proxy;
+mod queue;
+use cookies::PreparedCookiesFile;
+use downloads::{DownloadInput, DownloadJob};
+use process::ProcessState;
+use queue::{QueueEvent, QueueSnapshot, QueueState};
 
 pub mod toolchain;
 
 use toolchain::{
     activate_revision, active_tool_paths, build_tool_download_client, manifest_target,
     parse_channel_record, parse_local_toolchain_config, parse_manifest, probe_local_toolchain,
-    probe_target, promote_staged_toolchain, read_active_state, require_tools,
-    resolve_local_toolchain, revision_root, select_revision_manifest_asset, stage_target_revision,
+    probe_target, promote_staged_toolchain, read_active_manifest, read_active_state, require_tools,
+    resolve_local_toolchain, select_revision_manifest_asset, stage_target_revision,
     tool_names_for_target, tool_paths_for_root, tool_target_from, verify_channel_manifest,
     ActiveToolchainState, GitHubRelease, LocalToolchainConfig, ManifestTarget, ProgressReporter,
     StageTargetRevisionRequest, ToolInstallProgress, ToolPaths, ToolStatus, ToolchainSource,
-    ToolsManifest, REVISION_MANIFEST_FILE, TOOLS_DIRECTORY,
+    ToolsManifest, TOOLS_DIRECTORY,
 };
 
 const TOOLS_MANIFEST_FILE: &str = "tools-manifest.json";
@@ -38,11 +46,8 @@ const GITHUB_API_VERSION: &str = "2026-03-10";
 const GITHUB_PROXY_URL_PREFIX: &str = "https://gh-proxy.com/";
 const PROGRESS_PREFIX: &str = "yt-dlp-tauri-progress:";
 const OUTPUT_PATH_PREFIX: &str = "yt-dlp-tauri-output:";
-const COOKIE_HEADER_EXPIRY: &str = "2147483647";
 const TOOLCHAIN_SOURCE_FILE: &str = "toolchain-source.txt";
 const LOCAL_TOOLCHAIN_CONFIG_FILE: &str = "local-toolchain.json";
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Serialize)]
 struct AppState {
@@ -53,6 +58,8 @@ struct AppState {
     local_toolchain: LocalToolchainConfig,
     local_toolchain_paths: LocalToolchainPaths,
     cookies_file: Option<String>,
+    cookies_origin: Option<String>,
+    proxy: proxy::ProxyConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -65,6 +72,7 @@ struct LocalToolchainPaths {
 
 #[derive(Debug, Serialize)]
 struct VideoMetadata {
+    is_playlist: bool,
     title: String,
     id: Option<String>,
     webpage_url: String,
@@ -82,13 +90,6 @@ struct VideoFormatOption {
     height: Option<u32>,
     extension: String,
     is_best: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownloadRequest {
-    url: String,
-    format_selector: String,
-    label: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,31 +118,6 @@ struct LatestToolManifestResult {
     source: Option<String>,
 }
 
-#[derive(Clone, Default)]
-struct DownloadProcessState {
-    active_pid: Arc<Mutex<Option<u32>>>,
-    cancel_requested: Arc<Mutex<bool>>,
-}
-
-struct PreparedCookiesFile {
-    path: PathBuf,
-    temporary: bool,
-}
-
-impl PreparedCookiesFile {
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for PreparedCookiesFile {
-    fn drop(&mut self) {
-        if self.temporary {
-            let _ = fs::remove_file(&self.path);
-        }
-    }
-}
-
 #[tauri::command]
 async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -150,7 +126,7 @@ async fn get_app_state(app: AppHandle) -> Result<AppState, String> {
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -174,7 +150,7 @@ async fn set_download_directory(directory: String) -> Result<AppState, String> {
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -190,45 +166,42 @@ async fn reset_download_directory() -> Result<AppState, String> {
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn set_cookies_file(path: String) -> Result<AppState, String> {
+async fn set_proxy_config(config: proxy::ProxyConfig) -> Result<proxy::ProxyConfig, String> {
+    tauri::async_runtime::spawn_blocking(move || proxy::save(&state_directory()?, config))
+        .await
+        .map_err(to_string)?
+}
+
+#[tauri::command]
+async fn set_cookies_file(path: String, url: Option<String>) -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let trimmed = path.trim();
         if trimmed.is_empty() {
             return Err("Cookie file cannot be empty.".to_string());
         }
 
-        let path = PathBuf::from(trimmed);
-        validate_cookies_file_path(&path)?;
-        let state_dir = state_directory()?;
-        fs::create_dir_all(&state_dir).map_err(to_string)?;
-        fs::write(
-            state_dir.join("cookies-file.txt"),
-            path.display().to_string(),
-        )
-        .map_err(to_string)?;
+        let selection = cookies::select(PathBuf::from(trimmed), url.as_deref().unwrap_or(""))?;
+        cookies::save_selection(&state_directory()?, Some(&selection))?;
 
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
 async fn clear_cookies_file() -> Result<AppState, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let state_file = cookies_file_state_path()?;
-        if state_file.exists() {
-            fs::remove_file(state_file).map_err(to_string)?;
-        }
+        cookies::save_selection(&state_directory()?, None)?;
 
         build_app_state(String::new())
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -239,12 +212,18 @@ async fn open_download_directory() -> Result<(), String> {
         open_path(&directory)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState, String> {
+async fn set_toolchain_source(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    source: String,
+) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         let source = ToolchainSource::parse(&source)?;
         ensure_writable_directories()?;
         let tools_root = tools_root_for_source(&app, source)?;
@@ -252,15 +231,18 @@ async fn set_toolchain_source(app: AppHandle, source: String) -> Result<AppState
         build_app_state(tools_root)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
 async fn set_local_toolchain(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     config: LocalToolchainInput,
 ) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         let config = LocalToolchainConfig::from_paths(
             optional_input_path(config.yt_dlp_path),
             optional_input_path(config.ffmpeg_directory),
@@ -272,19 +254,24 @@ async fn set_local_toolchain(
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn auto_detect_local_toolchain(app: AppHandle) -> Result<AppState, String> {
+async fn auto_detect_local_toolchain(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+) -> Result<AppState, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         ensure_writable_directories()?;
         write_local_toolchain_config(&LocalToolchainConfig::default())?;
         let source = read_toolchain_source()?;
         build_app_state(tools_root_for_source(&app, source)?)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -304,7 +291,7 @@ async fn check_tools(app: AppHandle) -> Result<Vec<ToolStatus>, String> {
         }
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -319,7 +306,7 @@ async fn check_tools_with_manifest(
         probe_manifest_tools(&app, &target)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
@@ -330,15 +317,18 @@ async fn fetch_latest_tool_manifest(
         fetch_latest_tool_manifest_blocking(&github_access_mode)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
 async fn install_tools(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = read_current_manifest_json(&app)?;
@@ -351,16 +341,19 @@ async fn install_tools(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
 async fn install_tools_from_manifest(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     manifest_json: String,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         install_and_activate_manifest(
@@ -372,16 +365,19 @@ async fn install_tools_from_manifest(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
 async fn reinstall_tools(
     app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
     manifest_json: Option<String>,
     github_access_mode: String,
 ) -> Result<Vec<ToolStatus>, String> {
+    let maintenance = process_state.begin_maintenance()?;
     tauri::async_runtime::spawn_blocking(move || {
+        let _maintenance = maintenance;
         require_managed_toolchain_source()?;
         let target_name = current_tool_target()?;
         let manifest_json = match manifest_json {
@@ -397,23 +393,32 @@ async fn reinstall_tools(
         )
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, String> {
+async fn parse_metadata(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    url: String,
+) -> Result<VideoMetadata, String> {
+    let task = process_state.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
         validate_http_url(&url)?;
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
         let cookies_file = prepared_cookies_file_for_url(&url)?;
+        let proxy = proxy::read(&state_directory()?)?;
         append_log("metadata", &format!("Parsing {url}"));
 
-        let mut command = background_command(&tools.yt_dlp);
-        let output = command
+        let mut command = Command::new(&tools.yt_dlp);
+        proxy.configure(&mut command);
+        command
             .args([
                 "--ignore-config",
                 "--no-playlist",
+                "--playlist-items",
+                "1",
                 "--dump-single-json",
                 "--ffmpeg-location",
             ])
@@ -423,198 +428,222 @@ async fn parse_metadata(app: AppHandle, url: String) -> Result<VideoMetadata, St
             .args(yt_dlp_cookie_args(
                 cookies_file.as_ref().map(PreparedCookiesFile::path),
             ))
-            .arg(&url)
-            .output()
-            .map_err(|error| {
-                format!(
-                    "Failed to start yt-dlp at {}: {error}",
-                    tools.yt_dlp.display()
-                )
-            })?;
+            .arg(&url);
+        let mut json = String::new();
+        let output = task.run(
+            &mut command,
+            "Video metadata parsing",
+            Some(Duration::from_secs(120)),
+            |line| {
+                json.push_str(line);
+                json.push('\n');
+            },
+        )?;
 
         if !output.status.success() {
             append_log("metadata", "Failed to parse metadata.");
-            return Err(process_failure_message(
+            return Err(proxy.redact_error(process_failure_message(
                 "Failed to parse video metadata.",
                 output.status.code(),
                 &output.stderr,
-                &output.stdout,
-            ));
+                json.as_bytes(),
+            )));
         }
 
-        parse_metadata_json(&String::from_utf8_lossy(&output.stdout), &url)
+        parse_metadata_json(&json, &url)
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn download_video(
-    app: AppHandle,
-    process_state: tauri::State<'_, DownloadProcessState>,
-    request: DownloadRequest,
-) -> Result<Option<String>, String> {
-    let process_state = process_state.inner().clone();
+fn cancel_metadata(process_state: tauri::State<'_, ProcessState>) -> Result<(), String> {
+    process_state.cancel()
+}
 
+#[tauri::command]
+async fn parse_playlist_page(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    url: String,
+    start: u32,
+) -> Result<playlist::PlaylistPage, String> {
+    let task = process_state.begin()?;
     tauri::async_runtime::spawn_blocking(move || {
-        validate_http_url(&request.url)?;
+        let url = playlist::source_url(&url)?;
+        let mut reader = playlist::PageReader::new(start)?;
         let tools = locate_tools(&app)?;
         require_tools(&tools)?;
-        ensure_writable_directories()?;
-        let output_dir = download_directory()?;
-        let cookies_file = prepared_cookies_file_for_url(&request.url)?;
-        append_log("download", &format!("Starting {} {}", request.label, request.url));
-
-        let mut command = background_command(&tools.yt_dlp);
-        let mut child = command
+        let cookies = prepared_cookies_file_for_url(&url)?;
+        let proxy = proxy::read(&state_directory()?)?;
+        let mut command = Command::new(&tools.yt_dlp);
+        proxy.configure(&mut command);
+        command
             .args([
                 "--ignore-config",
-                "--no-playlist",
-                "--newline",
-                "--paths",
+                "--yes-playlist",
+                "--flat-playlist",
+                "--lazy-playlist",
+                "--dump-json",
+                "--skip-download",
+                "--playlist-items",
             ])
-            .arg(format!("home:{}", output_dir.display()))
-            .args(["--output", "%(title).200B [%(id)s].%(ext)s", "--format"])
-            .arg(if request.format_selector.trim().is_empty() {
-                "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b".to_string()
-            } else {
-                request.format_selector.clone()
-            })
-            .args(["--merge-output-format", "mp4", "--ffmpeg-location"])
+            .arg(format!("{start}:{}", start + playlist::PAGE_SIZE))
+            .arg("--ffmpeg-location")
             .arg(&tools.ffmpeg_dir)
-            .args(["--js-runtimes"])
+            .arg("--js-runtimes")
             .arg(format!("deno:{}", tools.deno.display()))
             .args(yt_dlp_cookie_args(
-                cookies_file.as_ref().map(PreparedCookiesFile::path),
+                cookies.as_ref().map(PreparedCookiesFile::path),
             ))
-            .args([
-                "--progress-template",
-                &format!(
-                    "{}%(progress.status)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
-                    PROGRESS_PREFIX
-                ),
-                "--print",
-                &format!("after_move:{}%(filepath)s", OUTPUT_PATH_PREFIX),
-                "--progress",
-            ])
-            .arg(&request.url)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| format!("Failed to start yt-dlp at {}: {error}", tools.yt_dlp.display()))?;
-        let pid = child.id();
-        set_active_process(&process_state, pid)?;
-
-        emit_progress(
-            &app,
-            DownloadProgress {
-                percent: None,
-                status: format!("Starting {}", request.label),
-                speed: None,
-                eta: None,
-                raw: None,
-            },
+            .arg("--")
+            .arg(&url);
+        let result = task.run(
+            &mut command,
+            "Playlist page",
+            Some(Duration::from_secs(120)),
+            |line| reader.line(line),
         );
-
-        let output_path = Arc::new(Mutex::new(None::<String>));
-        let stderr_lines = Arc::new(Mutex::new(Vec::<String>::new()));
-
-        let stdout_handle = child.stdout.take().map(|stdout| {
-            let app = app.clone();
-            let output_path = Arc::clone(&output_path);
-            thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    if let Some(progress) = parse_progress_line(&line) {
-                        emit_progress(&app, progress);
-                    }
-
-                    if let Some(path) = line.strip_prefix(OUTPUT_PATH_PREFIX) {
-                        if let Ok(mut guard) = output_path.lock() {
-                            *guard = Some(path.trim().to_string());
-                        }
-                    }
-                }
-            })
-        });
-
-        let stderr_handle = child.stderr.take().map(|stderr| {
-            let stderr_lines = Arc::clone(&stderr_lines);
-            thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    if let Ok(mut guard) = stderr_lines.lock() {
-                        guard.push(line);
-                    }
-                }
-            })
-        });
-
-        let status = child.wait().map_err(to_string)?;
-        if let Some(handle) = stdout_handle {
-            let _ = handle.join();
-        }
-        if let Some(handle) = stderr_handle {
-            let _ = handle.join();
-        }
-
-        if !status.success() {
-            let details = stderr_lines.lock().map(|lines| lines.join("\n")).unwrap_or_default();
-            let cancelled = was_cancel_requested(&process_state);
-            clear_active_process(&process_state, pid);
-            if cancelled {
-                append_log("download", "Cancelled by user.");
-                return Err("Download cancelled.".to_string());
-            }
-            append_log("download", &format!("Failed. {details}"));
-            return Err(process_failure_message(
-                "Download failed.",
-                status.code(),
-                details.as_bytes(),
+        let error = match result {
+            Ok(output) if output.status.success() => None,
+            Ok(output) => Some(process_failure_message(
+                "Playlist parsing failed.",
+                output.status.code(),
+                &output.stderr,
                 &[],
-            ));
-        }
-
-        clear_active_process(&process_state, pid);
-
-        emit_progress(
-            &app,
-            DownloadProgress {
-                percent: Some(100.0),
-                status: "Completed".to_string(),
-                speed: None,
-                eta: None,
-                raw: None,
-            },
-        );
-
-        let saved_path = output_path.lock().ok().and_then(|guard| guard.clone());
-        append_log("download", &format!("Completed. Output={}", saved_path.as_deref().unwrap_or("unknown")));
-        Ok(saved_path)
+            )),
+            Err(error) => Some(error),
+        };
+        Ok(reader.finish(error.map(|message| proxy.redact_error(message))))
     })
     .await
-    .map_err(join_error)?
+    .map_err(to_string)?
 }
 
 #[tauri::command]
-async fn cancel_download(
-    process_state: tauri::State<'_, DownloadProcessState>,
+fn get_download_queue(queue: tauri::State<'_, QueueState>) -> Result<QueueSnapshot, String> {
+    queue.snapshot()
+}
+
+#[tauri::command]
+async fn enqueue_downloads(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+    requests: Vec<DownloadInput>,
+) -> Result<QueueSnapshot, String> {
+    let reservation = process_state.begin_named("enqueue")?;
+    let queue = queue.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        let tools = locate_tools(&app)?;
+        require_tools(&tools)?;
+        let directory = download_directory()?;
+        let cookies = cookies::read_selection(&state_directory()?)?;
+        let proxy = proxy::read(&state_directory()?)?;
+        let jobs = requests
+            .into_iter()
+            .map(|input| {
+                DownloadJob::new(
+                    input,
+                    directory.clone(),
+                    tools.clone(),
+                    cookies.clone(),
+                    proxy.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        queue.enqueue(jobs)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
+fn cancel_request(
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+) -> Result<QueueSnapshot, String> {
+    queue.cancel(&id)
+}
+
+#[tauri::command]
+async fn retry_request(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+) -> Result<QueueSnapshot, String> {
+    let reservation = process_state.begin_named(&format!("retry-{id}"))?;
+    let queue = queue.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _reservation = reservation;
+        let mut job = queue.job(&id)?;
+        job.tools = locate_tools(&app)?;
+        require_tools(&job.tools)?;
+        job.cookies = cookies::read_selection(&state_directory()?)?;
+        job.proxy = proxy::read(&state_directory()?)?;
+        queue.retry(&id, job)
+    })
+    .await
+    .map_err(to_string)?
+}
+
+#[tauri::command]
+fn set_queue_options(
+    queue: tauri::State<'_, QueueState>,
+    concurrency: usize,
+    paused: bool,
+) -> Result<QueueSnapshot, String> {
+    queue.set_options(concurrency, paused)
+}
+
+#[tauri::command]
+fn clear_finished_requests(queue: tauri::State<'_, QueueState>) -> Result<QueueSnapshot, String> {
+    queue.clear_finished()
+}
+
+#[tauri::command]
+async fn open_request_output(
+    queue: tauri::State<'_, QueueState>,
+    id: String,
+    folder: bool,
 ) -> Result<(), String> {
-    let pid = {
-        let guard = process_state.active_pid.lock().map_err(lock_error)?;
-        *guard
-    };
+    let item = queue.item(&id)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = if folder {
+            PathBuf::from(item.directory)
+        } else if item.status == queue::RequestStatus::Completed {
+            PathBuf::from(
+                item.output_path
+                    .ok_or("The output file path is unavailable.")?,
+            )
+        } else {
+            return Err("This request has not completed.".to_string());
+        };
+        if !path.exists() {
+            return Err("The output location no longer exists.".to_string());
+        }
+        open_path(&path)
+    })
+    .await
+    .map_err(to_string)?
+}
 
-    let Some(pid) = pid else {
-        return Ok(());
-    };
-
-    {
-        let mut guard = process_state.cancel_requested.lock().map_err(lock_error)?;
-        *guard = true;
-    }
-
-    tauri::async_runtime::spawn_blocking(move || kill_process_tree(pid))
-        .await
-        .map_err(join_error)?
+#[tauri::command]
+async fn close_application(
+    app: AppHandle,
+    process_state: tauri::State<'_, ProcessState>,
+    queue: tauri::State<'_, QueueState>,
+) -> Result<(), String> {
+    queue.shutdown();
+    let processes = process_state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        processes.wait_for_idle(Duration::from_secs(3));
+        app.exit(0);
+    })
+    .await
+    .map_err(to_string)
 }
 
 fn locate_tools(app: &AppHandle) -> Result<ToolPaths, String> {
@@ -955,49 +984,33 @@ fn read_current_manifest(app: &AppHandle) -> Result<ToolsManifest, String> {
 fn read_current_manifest_json(app: &AppHandle) -> Result<String, String> {
     let target = current_tool_target()?;
     let base = app_data_root()?;
-    if let Some(state) = read_active_state(&base, &target)? {
-        let _ = active_tool_paths(&base, &target)?;
-        let path = revision_root(&base, &target, &state.revision)?.join(REVISION_MANIFEST_FILE);
-        return fs::read_to_string(&path).map_err(|error| {
-            format!(
-                "Failed to read active toolchain manifest at {}: {error}",
-                path.display()
-            )
-        });
+    if let Some(json) = read_active_manifest(&base, &target)? {
+        return Ok(json);
     }
 
     let bundled_path = bundled_manifest_path(app)?;
     let bundled_json = fs::read_to_string(&bundled_path).map_err(to_string)?;
-    let bundled_manifest = manifest_from_json(&bundled_json)?;
-    let active_manifest = active_tools_manifest_path()
+    let active_json = active_tools_manifest_path()
         .ok()
         .filter(|path| path.exists())
-        .map(|path| {
-            let json = fs::read_to_string(&path).map_err(to_string)?;
-            let manifest = manifest_from_json(&json)?;
-            Ok::<_, String>((json, manifest))
-        })
+        .map(|path| fs::read_to_string(&path).map_err(to_string))
         .transpose()?;
 
-    match active_manifest {
-        Some((json, manifest))
-            if manifest_freshness_key(&manifest) > manifest_freshness_key(&bundled_manifest) =>
-        {
-            Ok(json)
-        }
-        _ => Ok(bundled_json),
-    }
+    select_preferred_manifest_json(bundled_json, active_json)
 }
 
-#[cfg(test)]
-fn select_preferred_manifest<'a>(
-    bundled: &'a ToolsManifest,
-    active: Option<&'a ToolsManifest>,
-) -> &'a ToolsManifest {
-    match active {
-        Some(active) if manifest_freshness_key(active) > manifest_freshness_key(bundled) => active,
-        _ => bundled,
+fn select_preferred_manifest_json(
+    bundled_json: String,
+    active_json: Option<String>,
+) -> Result<String, String> {
+    let bundled = manifest_from_json(&bundled_json)?;
+    if let Some(json) = active_json {
+        let active = manifest_from_json(&json)?;
+        if manifest_freshness_key(&active) > manifest_freshness_key(&bundled) {
+            return Ok(json);
+        }
     }
+    Ok(bundled_json)
 }
 
 fn manifest_freshness_key(manifest: &ToolsManifest) -> &str {
@@ -1124,6 +1137,7 @@ fn parse_metadata_json(json: &str, fallback_url: &str) -> Result<VideoMetadata, 
     let format_options = build_format_options(&root);
 
     Ok(VideoMetadata {
+        is_playlist: root.get("entries").is_some(),
         title,
         id,
         webpage_url,
@@ -1265,43 +1279,8 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
     }
 }
 
-fn emit_progress(app: &AppHandle, progress: DownloadProgress) {
-    let _ = app.emit("download-progress", progress);
-}
-
 fn emit_tool_install_progress(app: &AppHandle, progress: ToolInstallProgress) {
     let _ = app.emit("tool-install-progress", progress);
-}
-
-fn set_active_process(state: &DownloadProcessState, pid: u32) -> Result<(), String> {
-    {
-        let mut guard = state.active_pid.lock().map_err(lock_error)?;
-        *guard = Some(pid);
-    }
-    {
-        let mut guard = state.cancel_requested.lock().map_err(lock_error)?;
-        *guard = false;
-    }
-    Ok(())
-}
-
-fn clear_active_process(state: &DownloadProcessState, pid: u32) {
-    if let Ok(mut guard) = state.active_pid.lock() {
-        if guard.is_some_and(|active_pid| active_pid == pid) {
-            *guard = None;
-        }
-    }
-    if let Ok(mut guard) = state.cancel_requested.lock() {
-        *guard = false;
-    }
-}
-
-fn was_cancel_requested(state: &DownloadProcessState) -> bool {
-    state
-        .cancel_requested
-        .lock()
-        .map(|guard| *guard)
-        .unwrap_or(false)
 }
 
 fn build_app_state(tools_root: String) -> Result<AppState, String> {
@@ -1315,6 +1294,7 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         ffmpeg_directory,
         deno_path: local_resolution.deno,
     };
+    let cookies = cookies::read_selection(&state_directory()?)?;
     Ok(AppState {
         download_directory: download_directory()?.display().to_string(),
         tools_root,
@@ -1323,7 +1303,11 @@ fn build_app_state(tools_root: String) -> Result<AppState, String> {
         toolchain_source,
         local_toolchain,
         local_toolchain_paths,
-        cookies_file: cookies_file()?.map(|path| path.display().to_string()),
+        cookies_file: cookies
+            .as_ref()
+            .map(|selection| selection.path.display().to_string()),
+        cookies_origin: cookies.and_then(|selection| selection.origin),
+        proxy: proxy::read(&state_directory()?)?,
     })
 }
 
@@ -1331,34 +1315,6 @@ fn optional_input_path(value: Option<String>) -> Option<PathBuf> {
     value
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
-}
-
-fn kill_process_tree(pid: u32) -> Result<(), String> {
-    let pid_text = pid.to_string();
-    let mut command = if cfg!(target_os = "windows") {
-        let mut command = background_command("taskkill");
-        command.args(["/PID", &pid_text, "/T", "/F"]);
-        command
-    } else {
-        let mut command = background_command("kill");
-        command.args(["-TERM", &pid_text]);
-        command
-    };
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to start cancel command for process {pid}: {error}"))?;
-
-    if output.status.success() {
-        append_log("download", &format!("Cancel requested for process {pid}."));
-        Ok(())
-    } else {
-        Err(process_failure_message(
-            &format!("Failed to cancel process {pid}."),
-            output.status.code(),
-            &output.stderr,
-            &output.stdout,
-        ))
-    }
 }
 
 fn download_directory() -> Result<PathBuf, String> {
@@ -1374,248 +1330,16 @@ fn download_directory() -> Result<PathBuf, String> {
     Ok(default_download_directory())
 }
 
-fn cookies_file() -> Result<Option<PathBuf>, String> {
-    let configured = cookies_file_state_path()?;
-    if configured.exists() {
-        let value = fs::read_to_string(configured).map_err(to_string)?;
-        let value = value.trim();
-        if !value.is_empty() {
-            return Ok(Some(PathBuf::from(value)));
-        }
-    }
-
-    Ok(None)
-}
-
 fn prepared_cookies_file_for_url(url: &str) -> Result<Option<PreparedCookiesFile>, String> {
-    let Some(path) = cookies_file()? else {
-        return Ok(None);
-    };
-
-    prepare_cookies_file_path_for_url(&path, url).map(Some)
-}
-
-fn validate_cookies_file_path(path: &Path) -> Result<(), String> {
-    if !path.is_file() {
-        return Err(format!("Cookie file does not exist: {}", path.display()));
-    }
-
-    fs::File::open(path)
-        .map(|_| ())
-        .map_err(|error| format!("Cookie file cannot be opened: {}: {error}", path.display()))
-}
-
-fn prepare_cookies_file_path_for_url(
-    path: &Path,
-    url: &str,
-) -> Result<PreparedCookiesFile, String> {
-    validate_cookies_file_path(path)?;
-    let content = fs::read_to_string(path).map_err(|error| {
-        format!(
-            "Cookie file cannot be read as text: {}: {error}",
-            path.display()
-        )
-    })?;
-
-    if is_netscape_cookie_content(&content) {
-        return Ok(PreparedCookiesFile {
-            path: path.to_path_buf(),
-            temporary: false,
-        });
-    }
-
-    if !looks_like_cookie_header_content(&content) {
-        return Err(
-            "Cookie file must be Netscape cookies.txt or a one-line Cookie header such as `a=b; c=d`."
-                .to_string(),
-        );
-    }
-
-    let converted = cookie_header_to_netscape_content(url, &content)?;
-    let converted_path = temp_cookies_file_path();
-    fs::write(&converted_path, converted).map_err(|error| {
-        format!(
-            "Failed to prepare temporary Cookie header file at {}: {error}",
-            converted_path.display()
-        )
-    })?;
-
-    Ok(PreparedCookiesFile {
-        path: converted_path,
-        temporary: true,
-    })
-}
-
-fn cookies_file_state_path() -> Result<PathBuf, String> {
-    Ok(state_directory()?.join("cookies-file.txt"))
+    cookies::read_selection(&state_directory()?)?
+        .map(|selection| cookies::prepare(&selection, url))
+        .transpose()
 }
 
 fn yt_dlp_cookie_args(cookies_file: Option<&Path>) -> Vec<String> {
     cookies_file
         .map(|path| vec!["--cookies".to_string(), path.display().to_string()])
         .unwrap_or_default()
-}
-
-fn is_netscape_cookie_content(content: &str) -> bool {
-    content.lines().any(|line| {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return false;
-        }
-
-        line.split('\t').count() == 7
-    })
-}
-
-fn looks_like_cookie_header_content(content: &str) -> bool {
-    parse_cookie_header_pairs(content)
-        .map(|pairs| !pairs.is_empty())
-        .unwrap_or(false)
-}
-
-fn cookie_header_to_netscape_content(url: &str, content: &str) -> Result<String, String> {
-    let (domain, include_subdomains) = cookie_domain_for_url(url)?;
-    let include_subdomains = if include_subdomains { "TRUE" } else { "FALSE" };
-    let secure = if url.starts_with("https://") {
-        "TRUE"
-    } else {
-        "FALSE"
-    };
-    let pairs = parse_cookie_header_pairs(content)?;
-    if pairs.is_empty() {
-        return Err("Cookie header file does not contain any cookie pairs.".to_string());
-    }
-
-    let mut lines = vec![
-        "# Netscape HTTP Cookie File".to_string(),
-        "# Generated by yt-dlp-tauri from a Cookie header file.".to_string(),
-    ];
-
-    for (name, value) in pairs {
-        lines.push(format!(
-            "{domain}\t{include_subdomains}\t/\t{secure}\t{COOKIE_HEADER_EXPIRY}\t{name}\t{value}"
-        ));
-    }
-    lines.push(String::new());
-    Ok(lines.join("\n"))
-}
-
-fn parse_cookie_header_pairs(content: &str) -> Result<Vec<(String, String)>, String> {
-    let joined = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let header = strip_cookie_header_prefix(&joined).trim();
-    if !header.contains('=') {
-        return Err("Cookie header file does not contain `name=value` pairs.".to_string());
-    }
-
-    let mut pairs = Vec::new();
-    for part in header.split(';') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-
-        let Some((name, value)) = part.split_once('=') else {
-            return Err(format!("Cookie header entry is missing `=`: {part}"));
-        };
-        let name = name.trim();
-        if name.is_empty() || !is_safe_cookie_field(name) {
-            return Err(format!(
-                "Cookie header contains an invalid cookie name: {name}"
-            ));
-        }
-        if !is_safe_cookie_field(value) {
-            return Err(format!(
-                "Cookie header contains an invalid value for {name}."
-            ));
-        }
-
-        pairs.push((name.to_string(), value.trim().to_string()));
-    }
-
-    Ok(pairs)
-}
-
-fn strip_cookie_header_prefix(content: &str) -> &str {
-    let trimmed = content.trim_start();
-    if trimmed
-        .get(..7)
-        .map(|prefix| prefix.eq_ignore_ascii_case("cookie:"))
-        .unwrap_or(false)
-    {
-        &trimmed[7..]
-    } else {
-        trimmed
-    }
-}
-
-fn is_safe_cookie_field(value: &str) -> bool {
-    !value
-        .chars()
-        .any(|character| character == '\t' || character == '\r' || character == '\n')
-}
-
-fn cookie_domain_for_url(url: &str) -> Result<(String, bool), String> {
-    let host = http_url_host(url)
-        .ok_or_else(|| "Unable to determine host for Cookie header conversion.".to_string())?;
-    if host == "localhost" || host.parse::<std::net::IpAddr>().is_ok() {
-        return Ok((host, false));
-    }
-
-    let labels = host
-        .split('.')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if labels.len() < 2 {
-        return Ok((host, false));
-    }
-
-    let base = if labels.len() > 2 && labels.first().is_some_and(|label| *label == "www") {
-        labels[1..].join(".")
-    } else if labels.len() > 2 {
-        labels[labels.len() - 2..].join(".")
-    } else {
-        host
-    };
-
-    Ok((format!(".{base}"), true))
-}
-
-fn http_url_host(url: &str) -> Option<String> {
-    let (_, rest) = url.split_once("://")?;
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or_default()
-        .rsplit('@')
-        .next()
-        .unwrap_or_default();
-    if authority.starts_with('[') {
-        return authority
-            .split_once(']')
-            .map(|(host, _)| host.trim_start_matches('[').to_ascii_lowercase());
-    }
-
-    authority
-        .split(':')
-        .next()
-        .filter(|host| !host.trim().is_empty())
-        .map(|host| host.trim().to_ascii_lowercase())
-}
-
-fn temp_cookies_file_path() -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    env::temp_dir().join(format!(
-        "yt-dlp-tauri-cookies-{}-{stamp}.txt",
-        std::process::id()
-    ))
 }
 
 fn default_download_directory() -> PathBuf {
@@ -1736,7 +1460,7 @@ fn append_log(phase: &str, message: &str) {
     else {
         return;
     };
-    let sanitized = message.replace('\r', " ").replace('\n', " ");
+    let sanitized = message.replace(['\r', '\n'], " ");
     let _ = writeln!(file, "{} [{phase}] {sanitized}", unix_timestamp());
 }
 
@@ -1753,27 +1477,8 @@ fn home_directory() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-fn background_command(program: impl AsRef<OsStr>) -> Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        let mut command = Command::new(program);
-        command.creation_flags(CREATE_NO_WINDOW);
-        command
-    }
-    #[cfg(not(windows))]
-    {
-        Command::new(program)
-    }
-}
-
 fn validate_http_url(url: &str) -> Result<(), String> {
-    let trimmed = url.trim();
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        Ok(())
-    } else {
-        Err("Enter a valid http or https video URL.".to_string())
-    }
+    cookies::http_url(url).map(|_| ())
 }
 
 fn first_line(bytes: &[u8]) -> Option<String> {
@@ -1837,12 +1542,93 @@ fn to_string(error: impl std::fmt::Display) -> String {
     error.to_string()
 }
 
-fn lock_error(error: impl std::fmt::Display) -> String {
-    format!("State lock failed: {error}")
-}
-
-fn join_error(error: impl std::fmt::Display) -> String {
-    error.to_string()
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(ProcessState::default())
+        .setup(|app| {
+            let processes = app.state::<ProcessState>().inner().clone();
+            let events = app.handle().clone();
+            app.manage(QueueState::new(
+                processes,
+                Arc::new(|job, task, report| job.run(task, report)),
+                Arc::new(move |event| match event {
+                    QueueEvent::Snapshot(snapshot) => {
+                        for item in snapshot
+                            .requests
+                            .iter()
+                            .filter(|item| item.revision == snapshot.revision)
+                        {
+                            append_log(
+                                "download",
+                                &format!(
+                                    "{}: {:?}; output={}; error={}",
+                                    item.id,
+                                    item.status,
+                                    item.output_path.as_deref().unwrap_or(""),
+                                    item.error.as_deref().unwrap_or("")
+                                ),
+                            );
+                        }
+                        let _ = events.emit("queue-changed", snapshot);
+                    }
+                    QueueEvent::Progress(item) => {
+                        let _ = events.emit("request-progress", item);
+                    }
+                }),
+            ));
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.state::<QueueState>().has_unfinished()
+                    || !window.state::<ProcessState>().is_idle()
+                {
+                    api.prevent_close();
+                    let _ = window.emit("confirm-close", ());
+                }
+            }
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_app_state,
+            set_download_directory,
+            reset_download_directory,
+            set_proxy_config,
+            set_cookies_file,
+            clear_cookies_file,
+            open_download_directory,
+            set_toolchain_source,
+            set_local_toolchain,
+            auto_detect_local_toolchain,
+            check_tools,
+            check_tools_with_manifest,
+            fetch_latest_tool_manifest,
+            install_tools,
+            install_tools_from_manifest,
+            reinstall_tools,
+            parse_metadata,
+            cancel_metadata,
+            parse_playlist_page,
+            get_download_queue,
+            enqueue_downloads,
+            cancel_request,
+            retry_request,
+            set_queue_options,
+            clear_finished_requests,
+            open_request_output,
+            close_application
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<QueueState>().shutdown();
+                app.state::<ProcessState>()
+                    .wait_for_idle(Duration::from_secs(3));
+            }
+        });
 }
 
 #[cfg(test)]
@@ -1928,12 +1714,13 @@ mod tests {
             targets: Vec::new(),
         };
 
-        let selected = select_preferred_manifest(&bundled, Some(&active));
-
-        assert_eq!(
-            selected.retrieved_at_utc.as_deref(),
-            Some("2026-06-23T00:00:00Z")
-        );
+        let active_json = serde_json::to_string(&active).unwrap();
+        let selected = select_preferred_manifest_json(
+            serde_json::to_string(&bundled).unwrap(),
+            Some(active_json.clone()),
+        )
+        .unwrap();
+        assert_eq!(selected, active_json);
     }
 
     #[test]
@@ -1951,12 +1738,35 @@ mod tests {
             targets: Vec::new(),
         };
 
-        let selected = select_preferred_manifest(&bundled, Some(&active));
+        let bundled_json = serde_json::to_string(&bundled).unwrap();
+        let selected = select_preferred_manifest_json(
+            bundled_json.clone(),
+            Some(serde_json::to_string(&active).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(selected, bundled_json);
+    }
 
+    #[test]
+    fn preferred_manifest_preserves_bundled_bytes_for_missing_or_equal_active_state() {
+        let bundled = include_str!("../tools-manifest.json").to_string();
         assert_eq!(
-            selected.retrieved_at_utc.as_deref(),
-            Some("2026-06-23T00:00:00Z")
+            select_preferred_manifest_json(bundled.clone(), None).unwrap(),
+            bundled,
         );
+        assert_eq!(
+            select_preferred_manifest_json(bundled.clone(), Some(format!("\n{bundled}"))).unwrap(),
+            bundled,
+        );
+    }
+
+    #[test]
+    fn preferred_manifest_rejects_malformed_input_without_silent_fallback() {
+        let valid = include_str!("../tools-manifest.json").to_string();
+        assert!(
+            select_preferred_manifest_json("invalid".to_string(), Some(valid.clone())).is_err()
+        );
+        assert!(select_preferred_manifest_json(valid, Some("invalid".to_string())).is_err());
     }
 
     #[test]
@@ -2028,15 +1838,6 @@ mod tests {
     }
 
     #[test]
-    fn install_update_and_reinstall_share_one_activation_path() {
-        let source = include_str!("lib.rs");
-        let production = source.split("#[cfg(test)]\nmod tests").next().unwrap();
-
-        assert!(production.matches("install_and_activate_manifest(").count() >= 4);
-        assert!(!production.contains("remove_managed_toolchain(&root)?"));
-    }
-
-    #[test]
     fn omits_cookie_args_without_configured_file() {
         assert!(yt_dlp_cookie_args(None).is_empty());
     }
@@ -2049,50 +1850,6 @@ mod tests {
             args,
             vec!["--cookies".to_string(), "account-cookies.txt".to_string()]
         );
-    }
-
-    #[test]
-    fn converts_cookie_header_file_content_to_netscape_cookie_content() {
-        let content = cookie_header_to_netscape_content(
-            "https://www.bilibili.com/video/BV1test",
-            "Cookie: buvid3=abc; bili_jct=token_value; CURRENT_FNVAL=2000",
-        )
-        .expect("cookie header should convert");
-
-        assert_eq!(
-            content,
-            [
-                "# Netscape HTTP Cookie File",
-                "# Generated by yt-dlp-tauri from a Cookie header file.",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbuvid3\tabc",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbili_jct\ttoken_value",
-                ".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tCURRENT_FNVAL\t2000",
-                "",
-            ]
-            .join("\n")
-        );
-    }
-
-    #[test]
-    fn converts_bare_cookie_header_file_content_to_netscape_cookie_content() {
-        let content = cookie_header_to_netscape_content(
-            "https://www.bilibili.com/video/BV1test",
-            "buvid3=abc; bili_jct=token_value",
-        )
-        .expect("bare cookie header should convert");
-
-        assert!(content.contains(".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbuvid3\tabc"));
-        assert!(content.contains(".bilibili.com\tTRUE\t/\tTRUE\t2147483647\tbili_jct\ttoken_value"));
-    }
-
-    #[test]
-    fn detects_netscape_cookie_content() {
-        assert!(is_netscape_cookie_content(
-            "# Netscape HTTP Cookie File\n.bilibili.com\tTRUE\t/\tFALSE\t0\tbuvid3\tabc\n"
-        ));
-        assert!(!is_netscape_cookie_content(
-            "buvid3=abc; bili_jct=token_value"
-        ));
     }
 
     #[test]
@@ -2185,34 +1942,4 @@ mod tests {
             ]
         );
     }
-}
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
-        .manage(DownloadProcessState::default())
-        .invoke_handler(tauri::generate_handler![
-            get_app_state,
-            set_download_directory,
-            reset_download_directory,
-            set_cookies_file,
-            clear_cookies_file,
-            open_download_directory,
-            set_toolchain_source,
-            set_local_toolchain,
-            auto_detect_local_toolchain,
-            check_tools,
-            check_tools_with_manifest,
-            fetch_latest_tool_manifest,
-            install_tools,
-            install_tools_from_manifest,
-            reinstall_tools,
-            parse_metadata,
-            download_video,
-            cancel_download
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
 }

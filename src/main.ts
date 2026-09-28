@@ -1,20 +1,44 @@
+import { createDownloadQueue } from "./download-queue";
+import { createPlaylistSelection } from "./playlist-selection";
+import { linkScope, playlistQualities } from "./playlist-model";
+import type { DownloadInput } from "./download-model";
+import { createNavigation } from "./navigation";
+import {
+  translations,
+  type Language,
+  type TranslationKey,
+} from "./translations";
+import type {
+  AppState,
+  LocalToolchainConfig,
+  LocalToolchainPaths,
+  ToolchainSource,
+  ProxyConfig,
+} from "./app-state";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import changelogMarkdown from "../CHANGELOG.md?raw";
 import packageInfo from "../package.json";
-import { releaseNotesForVersion, shouldShowReleaseNotes, stripTerminalSentencePunctuation } from "./release-notes";
-import { thumbnailUrlCandidates } from "./thumbnail";
 import {
-  summarizeRemoteTools,
-  summarizeTools,
-  type RemoteToolManifest,
-  type ToolAction,
-  type ToolStatus,
-  type ToolSummaryMode,
-} from "./toolchain";
-import { type GithubAccessMode, getUpdateStatus, parseGithubHttpError, parseLatestRelease, resolveGithubUrl } from "./update-check";
+  releaseNotesForVersion,
+  shouldShowReleaseNotes,
+  stripTerminalSentencePunctuation,
+} from "./release-notes";
+import { thumbnailUrlCandidates } from "./thumbnail";
+import { type ToolAction } from "./toolchain";
+import {
+  createToolchainSettings,
+  type ToolInstallProgress,
+} from "./toolchain-settings";
+import {
+  type GithubAccessMode,
+  getUpdateStatus,
+  parseGithubHttpError,
+  parseLatestRelease,
+  resolveGithubUrl,
+} from "./update-check";
 
 type VideoFormatOption = {
   label: string;
@@ -26,6 +50,7 @@ type VideoFormatOption = {
 
 type VideoMetadata = {
   title: string;
+  is_playlist?: boolean;
   id?: string;
   webpage_url: string;
   thumbnail_url?: string;
@@ -35,47 +60,14 @@ type VideoMetadata = {
   format_options: VideoFormatOption[];
 };
 
-type AppState = {
-  download_directory: string;
-  tools_root: string;
-  toolchain_revision?: string | null;
-  toolchain_source: ToolchainSource;
-  local_toolchain: LocalToolchainConfig;
-  local_toolchain_paths: LocalToolchainPaths;
-  cookies_file?: string | null;
-};
-
-type ToolchainSource = "managed" | "local";
-
-type LocalToolchainConfig = {
-  schemaVersion: number;
-  ytDlpPath?: string | null;
-  ffmpegDirectory?: string | null;
-  denoPath?: string | null;
-};
-
-type LocalToolchainPaths = Omit<LocalToolchainConfig, "schemaVersion">;
-
-type DownloadProgress = {
-  percent?: number;
-  status: string;
-  speed?: string;
-  eta?: string;
-  raw?: string;
-};
-
-type ToolInstallProgress = {
-  percent?: number;
-  status: string;
-  tool?: string;
-};
-
 const APP_VERSION = packageInfo.version;
 const PROJECT_REPOSITORY_URL = "https://github.com/Chlience/yt-dlp-tauri";
 const PROJECT_RELEASES_URL = `${PROJECT_REPOSITORY_URL}/releases`;
-const LATEST_RELEASE_API_URL = "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
+const LATEST_RELEASE_API_URL =
+  "https://api.github.com/repos/Chlience/yt-dlp-tauri/releases/latest";
 const GITHUB_ACCESS_STORAGE_KEY = "yt-dlp-tauri-github-access-mode";
-const RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY = "yt-dlp-tauri-release-notes-seen-version";
+const RELEASE_NOTES_SEEN_VERSION_STORAGE_KEY =
+  "yt-dlp-tauri-release-notes-seen-version";
 const MAX_TOASTS = 4;
 const TOAST_AUTO_DISMISS_MS: Record<NoticeTone, number> = {
   success: 6000,
@@ -83,353 +75,15 @@ const TOAST_AUTO_DISMISS_MS: Record<NoticeTone, number> = {
   error: 0,
 };
 
-const translations = {
-  en: {
-    "app.title": "yt-dlp-tauri",
-    "app.eyebrow": "Desktop downloader",
-    "app.heading": "Paste, choose, download.",
-    "notifications.label": "Notifications",
-    "language.label": "Language",
-    "action.settings": "Settings",
-    "action.close": "Close",
-    "action.done": "Done",
-    "action.dismissNotification": "Dismiss notification",
-    "action.parse": "Parse",
-    "action.download": "Download",
-    "action.cancel": "Cancel",
-    "action.openFolder": "Open folder",
-    "action.browse": "Browse",
-    "action.save": "Save",
-    "action.reset": "Reset",
-    "action.chooseCookies": "Choose Cookie file",
-    "action.clearCookies": "Clear",
-    "action.verifyTools": "Verify tools",
-    "action.checkToolUpdates": "Check tool updates",
-    "action.installTools": "Install tools",
-    "action.updateTools": "Update tools",
-    "action.reinstallTools": "Reinstall tools",
-    "action.choosePath": "Choose",
-    "action.chooseYtDlp": "Choose yt-dlp",
-    "action.chooseFfmpegDirectory": "Choose FFmpeg directory",
-    "action.chooseDeno": "Choose Deno",
-    "action.usePath": "Use PATH",
-    "action.checkUpdates": "Check updates",
-    "action.openRelease": "Open release",
-    "action.releaseNotes": "Release notes",
-    "action.projectHome": "Project home",
-    "github.accessLabel": "GitHub access mode",
-    "github.direct": "Direct",
-    "github.proxy": "gh-proxy",
-    "url.label": "Video URL",
-    "url.placeholder": "https://www.youtube.com/watch?v=...",
-    "cookies.label": "Cookie file",
-    "cookies.none": "No cookies",
-    "cookies.chooseFile": "Choose Cookie file",
-    "preview.thumbnailAlt": "video thumbnail",
-    "preview.emptyImage": "Preview",
-    "preview.label": "Preview",
-    "preview.noVideo": "No video parsed",
-    "preview.emptyStart": "Paste a video URL to inspect title, cover, duration, and qualities.",
-    "preview.emptyChanged": "Paste a URL and parse it before downloading.",
-    "preview.cookiesChanged": "Cookie file changed. Parse again before downloading.",
-    "preview.toolsChanged": "Tool source changed. Parse again before downloading.",
-    "preview.readingMetadata": "Reading metadata from yt-dlp...",
-    "preview.parseFailed": "Metadata parsing failed. Check the URL and tools.",
-    "preview.noDescription": "No description returned by yt-dlp.",
-    "download.quality": "Quality",
-    "progress.idle": "Idle",
-    "progress.parsing": "Parsing video metadata...",
-    "progress.metadataReady": "Metadata parsed. Choose a quality, then download.",
-    "progress.metadataFailed": "Metadata parsing failed.",
-    "progress.startingDownload": "Starting {quality} download...",
-    "progress.savedTo": "Saved to {path}",
-    "progress.completedOpenFolder": "Download completed. Open the folder to view the file.",
-    "progress.downloadCancelled": "Download cancelled.",
-    "progress.downloadFailed": "Download failed.",
-    "progress.cancelling": "Cancelling download...",
-    "progress.eta": "ETA",
-    "notice.checkingTools": "Checking tools...",
-    "notice.toolchainReady": "Toolchain ready.",
-    "notice.toolsMissing": "Some tools are missing.",
-    "notice.toolsOutdated": "Toolchain update available.",
-    "notice.toolsDamaged": "Toolchain needs reinstall.",
-    "notice.localToolchainReady": "Local toolchain ready.",
-    "notice.localToolsMissing": "Some local tools are missing.",
-    "notice.localToolsDamaged": "Local toolchain verification failed.",
-    "notice.toolCheckFailed": "Tool check failed.",
-    "notice.toolsInstalled": "Toolchain installed.",
-    "notice.toolInstallNeedsAttention": "Tool install needs attention.",
-    "notice.toolInstallFailed": "Tool install failed.",
-    "notice.metadataParsed": "Metadata parsed.",
-    "notice.downloadCompleted": "Download completed.",
-    "notice.downloadCancelled": "Download cancelled.",
-    "notice.folderUpdated": "Download folder updated.",
-    "notice.folderReset": "Download folder reset.",
-    "notice.cookiesUpdated": "Cookie file updated.",
-    "notice.cookiesCleared": "Cookie file cleared.",
-    "updates.checking": "Checking GitHub releases...",
-    "updates.available": "New version available: {version}",
-    "updates.current": "You are up to date.",
-    "updates.noRelease": "No GitHub release found yet.",
-    "updates.invalidRelease": "GitHub returned an unreadable release.",
-    "updates.failed": "Could not check updates: {message}",
-    "updates.rateLimited": "GitHub API rate limit reached. Try again after {time}, or switch GitHub access mode.",
-    "updates.later": "later",
-    "releaseNotes.kicker": "Updated",
-    "releaseNotes.title": "What's new",
-    "releaseNotes.version": "Version {version}",
-    "releaseNotes.empty": "No release notes found for this version.",
-    "settings.kicker": "Preferences",
-    "settings.title": "Settings",
-    "settings.outputFolder": "Output folder",
-    "settings.resolvingFolder": "Resolving download folder...",
-    "settings.toolchain": "Toolchain",
-    "settings.toolchainHint": "Per-target tools are verified with SHA-256.",
-    "settings.localToolchainHint": "Local executables are verified by behavior and remain user-managed.",
-    "settings.toolSource": "Tool source",
-    "settings.managedTools": "Managed",
-    "settings.localTools": "Local",
-    "settings.activeRevision": "Active revision",
-    "settings.noActiveRevision": "None",
-    "settings.resolvingTools": "Resolving tools path...",
-    "settings.installMissing": "Install missing tools automatically.",
-    "settings.installingTools": "Installing missing tools...",
-    "settings.updatingTools": "Updating tools to pinned versions...",
-    "settings.reinstallingTools": "Reinstalling managed tools...",
-    "settings.toolsPathPending": "Tools path not resolved yet",
-    "settings.toolsChecking": "Checking tools...",
-    "settings.toolsAvailable": "All required tools are available.",
-    "settings.toolsMissing": "Missing tools can be installed automatically.",
-    "settings.toolsDamaged": "Some tools are missing, damaged, or do not match the active manifest.",
-    "settings.localPathNotDetected": "Not detected",
-    "settings.detectingLocalTools": "Detecting local tools from PATH...",
-    "settings.usePathHint": "Clear selected paths and resolve all local tools from the current PATH.",
-    "settings.localToolsAvailable": "Local yt-dlp, FFmpeg, FFprobe and Deno passed verification.",
-    "settings.localToolsMissing": "Choose missing local paths or use the current PATH.",
-    "settings.localToolsDamaged": "One or more local tools failed version or compatibility checks.",
-    "settings.toolSourceFailed": "Could not change tool source: {message}",
-    "settings.localToolSaveFailed": "Could not save local tool paths: {message}",
-    "settings.localToolDetectFailed": "Could not detect local tools: {message}",
-    "settings.toolUpdatesChecking": "Checking the latest released tool manifest...",
-    "settings.toolUpdatesAvailable": "A released toolchain update is available.",
-    "settings.toolUpdatesCurrent": "Tools match the latest released manifest.",
-    "settings.toolUpdatesNoManifest": "The latest release does not include a tool manifest yet.",
-    "settings.toolUpdatesInvalidManifest": "The released tool manifest could not be read.",
-    "settings.toolUpdatesFailed": "Tool update check failed: {message}",
-    "settings.reinstallConfirm": "Download and verify a fresh toolchain at {path}? The current revision stays active until the replacement passes every check",
-    "settings.toolCheckFailed": "Tool check failed.",
-    "settings.toolsInstalled": "Toolchain installed.",
-    "settings.toolsInstallPartial": "Install finished, but some tools still need attention.",
-    "settings.toolInstallFailed": "Tool install failed.",
-    "settings.activity": "Activity",
-    "settings.activityHint": "Recent local events.",
-    "settings.version": "Version",
-    "settings.githubSite": "GitHub site",
-    "settings.chooseFolder": "Choose download folder",
-    "tool.currentUnknown": "unknown",
-    "event.booted": "App booted.",
-    "event.toolsAvailable": "yt-dlp, ffmpeg, ffprobe and deno are available.",
-    "event.toolsMissing": "Tool check found missing tools.",
-    "event.toolsDamaged": "Tool check found tools that need reinstall.",
-    "event.localToolsAvailable": "Local toolchain passed verification.",
-    "event.localToolsMissing": "Local toolchain has missing paths.",
-    "event.localToolsDamaged": "Local toolchain failed verification.",
-    "event.localToolsSelected": "Local tool source selected.",
-    "event.managedToolsSelected": "Managed tool source selected.",
-    "event.toolUpdatesAvailable": "Released toolchain update found.",
-    "event.toolUpdatesCurrent": "Tools match the latest released manifest.",
-    "event.toolsInstalled": "Toolchain installed.",
-    "event.toolsPartial": "Tool install completed with missing tools.",
-    "event.toolInstallFailed": "Tool install failed.",
-    "event.parsed": "Parsed {title}",
-    "event.metadataFailed": "Metadata parsing failed.",
-    "event.saved": "Saved {path}",
-    "event.downloadCompleted": "Download completed.",
-    "event.downloadCancelled": "Download cancelled.",
-    "event.downloadFailed": "Download failed.",
-    "event.cancelRequested": "Cancel requested.",
-    "event.cookiesUpdated": "Cookie file selected: {file}",
-    "event.cookiesCleared": "Cookie file cleared.",
-  },
-  zh: {
-    "app.title": "yt-dlp-tauri",
-    "app.eyebrow": "桌面下载器",
-    "app.heading": "粘贴，选择，下载。",
-    "notifications.label": "通知",
-    "language.label": "语言",
-    "action.settings": "设置",
-    "action.close": "关闭",
-    "action.done": "完成",
-    "action.dismissNotification": "关闭通知",
-    "action.parse": "解析",
-    "action.download": "下载",
-    "action.cancel": "取消",
-    "action.openFolder": "打开目录",
-    "action.browse": "浏览",
-    "action.save": "保存",
-    "action.reset": "重置",
-    "action.chooseCookies": "选择 Cookie 文件",
-    "action.clearCookies": "清除",
-    "action.verifyTools": "验证工具",
-    "action.checkToolUpdates": "检查工具更新",
-    "action.installTools": "安装工具",
-    "action.updateTools": "更新工具",
-    "action.reinstallTools": "重新安装工具",
-    "action.choosePath": "选择",
-    "action.chooseYtDlp": "选择 yt-dlp",
-    "action.chooseFfmpegDirectory": "选择 FFmpeg 目录",
-    "action.chooseDeno": "选择 Deno",
-    "action.usePath": "使用 PATH",
-    "action.checkUpdates": "检查更新",
-    "action.openRelease": "打开发布页",
-    "action.releaseNotes": "更新说明",
-    "action.projectHome": "项目主页",
-    "github.accessLabel": "GitHub 访问方式",
-    "github.direct": "直连",
-    "github.proxy": "gh-proxy",
-    "url.label": "视频链接",
-    "url.placeholder": "https://www.youtube.com/watch?v=...",
-    "cookies.label": "Cookie 文件",
-    "cookies.none": "未使用 Cookie",
-    "cookies.chooseFile": "选择 Cookie 文件",
-    "preview.thumbnailAlt": "视频缩略图",
-    "preview.emptyImage": "预览",
-    "preview.label": "预览",
-    "preview.noVideo": "尚未解析视频",
-    "preview.emptyStart": "粘贴视频链接后解析，可查看标题、封面、时长和清晰度。",
-    "preview.emptyChanged": "请先解析当前链接，再开始下载。",
-    "preview.cookiesChanged": "Cookie 文件已变更，请重新解析后再下载。",
-    "preview.toolsChanged": "工具来源已更改，请重新解析后再下载。",
-    "preview.readingMetadata": "正在通过 yt-dlp 读取信息...",
-    "preview.parseFailed": "解析失败。请检查链接和工具链。",
-    "preview.noDescription": "yt-dlp 未返回描述。",
-    "download.quality": "清晰度",
-    "progress.idle": "空闲",
-    "progress.parsing": "正在解析视频信息...",
-    "progress.metadataReady": "视频信息已解析。选择清晰度后即可下载。",
-    "progress.metadataFailed": "视频信息解析失败。",
-    "progress.startingDownload": "开始下载 {quality}...",
-    "progress.savedTo": "已保存到 {path}",
-    "progress.completedOpenFolder": "下载完成。打开目录即可查看文件。",
-    "progress.downloadCancelled": "下载已取消。",
-    "progress.downloadFailed": "下载失败。",
-    "progress.cancelling": "正在取消下载...",
-    "progress.eta": "剩余",
-    "notice.checkingTools": "正在检查工具链...",
-    "notice.toolchainReady": "工具链已就绪。",
-    "notice.toolsMissing": "缺少部分工具。",
-    "notice.toolsOutdated": "工具链有可用更新。",
-    "notice.toolsDamaged": "工具链需要重新安装。",
-    "notice.localToolchainReady": "本地工具链已就绪。",
-    "notice.localToolsMissing": "缺少部分本地工具。",
-    "notice.localToolsDamaged": "本地工具链验证失败。",
-    "notice.toolCheckFailed": "工具检查失败。",
-    "notice.toolsInstalled": "工具链已安装。",
-    "notice.toolInstallNeedsAttention": "工具安装需要处理。",
-    "notice.toolInstallFailed": "工具安装失败。",
-    "notice.metadataParsed": "视频信息已解析。",
-    "notice.downloadCompleted": "下载完成。",
-    "notice.downloadCancelled": "下载已取消。",
-    "notice.folderUpdated": "下载目录已更新。",
-    "notice.folderReset": "下载目录已重置。",
-    "notice.cookiesUpdated": "Cookie 文件已更新。",
-    "notice.cookiesCleared": "Cookie 文件已清除。",
-    "updates.checking": "正在检查 GitHub Releases...",
-    "updates.available": "发现新版本：{version}",
-    "updates.current": "当前已是最新版本。",
-    "updates.noRelease": "暂未找到 GitHub Release。",
-    "updates.invalidRelease": "GitHub 返回的发布信息无法读取。",
-    "updates.failed": "检查更新失败：{message}",
-    "updates.rateLimited": "GitHub API 访问额度已用尽。请在 {time} 后重试，或切换 GitHub 访问方式。",
-    "updates.later": "稍后",
-    "releaseNotes.kicker": "已更新",
-    "releaseNotes.title": "更新说明",
-    "releaseNotes.version": "版本 {version}",
-    "releaseNotes.empty": "当前版本没有更新说明。",
-    "settings.kicker": "偏好",
-    "settings.title": "设置",
-    "settings.outputFolder": "输出目录",
-    "settings.resolvingFolder": "正在解析下载目录...",
-    "settings.toolchain": "工具链",
-    "settings.toolchainHint": "按目标平台安装，并用 SHA-256 校验。",
-    "settings.localToolchainHint": "本地程序按实际行为验证，版本与文件由用户管理。",
-    "settings.toolSource": "工具来源",
-    "settings.managedTools": "应用管理",
-    "settings.localTools": "本地工具",
-    "settings.activeRevision": "当前 revision",
-    "settings.noActiveRevision": "未激活",
-    "settings.resolvingTools": "正在解析工具路径...",
-    "settings.installMissing": "可自动安装缺失工具。",
-    "settings.installingTools": "正在安装缺失工具...",
-    "settings.updatingTools": "正在更新到固定版本...",
-    "settings.reinstallingTools": "正在重新安装受管工具...",
-    "settings.toolsPathPending": "工具路径尚未解析",
-    "settings.toolsChecking": "正在检查工具链...",
-    "settings.toolsAvailable": "所需工具均可用。",
-    "settings.toolsMissing": "可自动安装缺失工具。",
-    "settings.toolsDamaged": "部分工具缺失、损坏，或与当前清单不匹配。",
-    "settings.localPathNotDetected": "未检测到",
-    "settings.detectingLocalTools": "正在从 PATH 检测本地工具...",
-    "settings.usePathHint": "清除已选择的路径，并从当前 PATH 重新解析全部本地工具。",
-    "settings.localToolsAvailable": "本地 yt-dlp、FFmpeg、FFprobe 和 Deno 已通过验证。",
-    "settings.localToolsMissing": "请选择缺失路径，或使用当前 PATH。",
-    "settings.localToolsDamaged": "部分本地工具未通过版本或组合兼容性检查。",
-    "settings.toolSourceFailed": "无法切换工具来源：{message}",
-    "settings.localToolSaveFailed": "无法保存本地工具路径：{message}",
-    "settings.localToolDetectFailed": "无法检测本地工具：{message}",
-    "settings.toolUpdatesChecking": "正在检查最新发布的工具清单...",
-    "settings.toolUpdatesAvailable": "有已发布的工具链更新。",
-    "settings.toolUpdatesCurrent": "工具链与最新发布清单一致。",
-    "settings.toolUpdatesNoManifest": "最新发布暂未附带工具清单。",
-    "settings.toolUpdatesInvalidManifest": "发布的工具清单无法读取。",
-    "settings.toolUpdatesFailed": "工具更新检查失败：{message}",
-    "settings.reinstallConfirm": "重新下载并校验 {path} 下的工具链？新版本通过全部检查前会继续使用当前版本",
-    "settings.toolCheckFailed": "工具检查失败。",
-    "settings.toolsInstalled": "工具链已安装。",
-    "settings.toolsInstallPartial": "安装结束，但仍有工具需要处理。",
-    "settings.toolInstallFailed": "工具安装失败。",
-    "settings.activity": "活动",
-    "settings.activityHint": "最近的本地事件。",
-    "settings.version": "版本",
-    "settings.githubSite": "GitHub 站点",
-    "settings.chooseFolder": "选择下载目录",
-    "tool.currentUnknown": "未知",
-    "event.booted": "应用已启动。",
-    "event.toolsAvailable": "yt-dlp、ffmpeg、ffprobe 和 deno 均可用。",
-    "event.toolsMissing": "工具检查发现缺失项。",
-    "event.toolsDamaged": "工具检查发现需要重新安装的项目。",
-    "event.localToolsAvailable": "本地工具链已通过验证。",
-    "event.localToolsMissing": "本地工具链存在缺失路径。",
-    "event.localToolsDamaged": "本地工具链验证失败。",
-    "event.localToolsSelected": "已选择本地工具来源。",
-    "event.managedToolsSelected": "已选择应用管理工具来源。",
-    "event.toolUpdatesAvailable": "发现已发布的工具链更新。",
-    "event.toolUpdatesCurrent": "工具链与最新发布清单一致。",
-    "event.toolsInstalled": "工具链已安装。",
-    "event.toolsPartial": "工具安装完成，但仍有缺失项。",
-    "event.toolInstallFailed": "工具安装失败。",
-    "event.parsed": "已解析 {title}",
-    "event.metadataFailed": "视频信息解析失败。",
-    "event.saved": "已保存 {path}",
-    "event.downloadCompleted": "下载完成。",
-    "event.downloadCancelled": "下载已取消。",
-    "event.downloadFailed": "下载失败。",
-    "event.cancelRequested": "已请求取消。",
-    "event.cookiesUpdated": "已选择 Cookie 文件：{file}",
-    "event.cookiesCleared": "Cookie 文件已清除。",
-  },
-} as const;
-
-type Language = keyof typeof translations;
-type TranslationKey = keyof (typeof translations)["en"];
 type NoticeTone = "success" | "warning" | "error";
 type UpdateTone = "neutral" | "success" | "warning" | "error";
 
 const state = {
+  initialized: false,
   metadata: null as VideoMetadata | null,
   selectedFormat: null as VideoFormatOption | null,
   busy: false,
-  activeOperation: null as "metadata" | "download" | "tools" | null,
+  activeOperation: null as "metadata" | "tools" | null,
   cancelRequested: false,
   lastUrl: "",
   toolsReady: false,
@@ -450,9 +104,14 @@ const state = {
   pendingToolManifestJson: null as string | null,
   updateChecking: false,
   latestReleaseUrl: "",
-  updateStatus: null as { key: TranslationKey; values: Record<string, string | number>; tone: UpdateTone } | null,
+  updateStatus: null as {
+    key: TranslationKey;
+    values: Record<string, string | number>;
+    tone: UpdateTone;
+  } | null,
   githubAccessMode: resolveInitialGithubAccessMode(),
   cookiesFile: null as string | null,
+  cookiesOrigin: null as string | null,
   language: resolveInitialLanguage(),
   releaseNotesOpen: false,
   thumbnailCandidates: [] as string[],
@@ -463,6 +122,7 @@ let releaseNotesReturnFocus: HTMLElement | null = null;
 const toastTimers = new Map<HTMLElement, number>();
 
 const elements = {
+  retryStartup: must<HTMLButtonElement>("#retry-startup"),
   url: must<HTMLInputElement>("#url"),
   parse: must<HTMLButtonElement>("#parse"),
   download: must<HTMLButtonElement>("#download"),
@@ -472,8 +132,15 @@ const elements = {
   clearCookies: must<HTMLButtonElement>("#clear-cookies"),
   settingsToggle: must<HTMLButtonElement>("#settings-toggle"),
   settingsClose: must<HTMLButtonElement>("#settings-close"),
-  settingsBackdrop: must<HTMLElement>("#settings-backdrop"),
-  settingsDrawer: must<HTMLElement>("#settings-drawer"),
+  appShell: must<HTMLElement>("#app-shell"),
+  newView: must<HTMLElement>("#new-view"),
+  workspace: must<HTMLElement>("#download-workspace"),
+  operationStatus: must<HTMLElement>("#operation-status"),
+  toolsRequired: must<HTMLElement>("#tools-required"),
+  emptyHints: must<HTMLElement>("#empty-hints"),
+  homeDirectory: must<HTMLElement>("#home-directory"),
+  directoryPreview: must<HTMLElement>("#download-directory-preview"),
+  appToolStatus: must<HTMLElement>("#app-tool-status"),
   languageEn: must<HTMLButtonElement>("#language-en"),
   languageZh: must<HTMLButtonElement>("#language-zh"),
   verifyTools: must<HTMLButtonElement>("#verify-tools"),
@@ -500,6 +167,9 @@ const elements = {
   githubLink: must<HTMLButtonElement>("#github-link"),
   githubDirect: must<HTMLButtonElement>("#github-direct"),
   githubProxy: must<HTMLButtonElement>("#github-proxy"),
+  proxyMode: must<HTMLSelectElement>("#proxy-mode"),
+  proxyUrl: must<HTMLInputElement>("#proxy-url"),
+  saveProxy: must<HTMLButtonElement>("#save-proxy"),
   releaseNotesBackdrop: must<HTMLElement>("#release-notes-backdrop"),
   releaseNotesDialog: must<HTMLElement>("#release-notes-dialog"),
   releaseNotesClose: must<HTMLButtonElement>("#release-notes-close"),
@@ -528,11 +198,57 @@ const elements = {
   toastRegion: must<HTMLElement>("#toast-region"),
 };
 
+const navigation = createNavigation();
+const queue = createDownloadQueue(t, updateButtons);
+const playlist = createPlaylistSelection({
+  t,
+  busy: (value) =>
+    setBusy(
+      value,
+      value ? t("playlist.loading") : t("progress.idle"),
+      "metadata",
+    ),
+  changed: () => {
+    updateDownloadOptions();
+    updateButtons();
+  },
+  currentUrl: () => elements.url.value.trim(),
+});
+let queueInitialized = false;
+let enqueueing = false;
+let showingScope = false;
+
+const {
+  setToolchainSource,
+  chooseLocalTool,
+  autoDetectLocalTools,
+  verifyTools,
+  installTools,
+  checkToolUpdates,
+  reinstallTools,
+  renderToolchainRevision,
+  renderToolchainSource,
+  renderLocalToolchainPaths,
+  updateToolActionButton,
+  updateToolInstallProgress,
+} = createToolchainSettings({
+  state,
+  elements,
+  t,
+  setBusy,
+  applyAppState,
+  loadAppState,
+  invalidateParsedVideo,
+  showNotice,
+  logEvent,
+});
+
 window.addEventListener("DOMContentLoaded", () => {
   bindEvents();
   applyTranslations();
-  listen<DownloadProgress>("download-progress", (event) => updateDownloadProgress(event.payload));
-  listen<ToolInstallProgress>("tool-install-progress", (event) => updateToolInstallProgress(event.payload));
+  listen<ToolInstallProgress>("tool-install-progress", (event) =>
+    updateToolInstallProgress(event.payload),
+  );
   void bootstrap();
 });
 
@@ -575,36 +291,53 @@ function applyTranslations() {
     }
   });
 
-  document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-i18n-placeholder]").forEach((element) => {
-    const key = element.dataset.i18nPlaceholder as TranslationKey | undefined;
-    if (key) {
-      element.placeholder = t(key);
-    }
-  });
+  document
+    .querySelectorAll<
+      HTMLInputElement | HTMLTextAreaElement
+    >("[data-i18n-placeholder]")
+    .forEach((element) => {
+      const key = element.dataset.i18nPlaceholder as TranslationKey | undefined;
+      if (key) {
+        element.placeholder = t(key);
+      }
+    });
 
-  document.querySelectorAll<HTMLElement>("[data-i18n-aria-label]").forEach((element) => {
-    const key = element.dataset.i18nAriaLabel as TranslationKey | undefined;
-    if (key) {
-      element.setAttribute("aria-label", t(key));
-    }
-  });
+  document
+    .querySelectorAll<HTMLElement>("[data-i18n-aria-label]")
+    .forEach((element) => {
+      const key = element.dataset.i18nAriaLabel as TranslationKey | undefined;
+      if (key) {
+        element.setAttribute("aria-label", t(key));
+      }
+    });
 
-  document.querySelectorAll<HTMLImageElement>("[data-i18n-alt]").forEach((element) => {
-    const key = element.dataset.i18nAlt as TranslationKey | undefined;
-    if (key) {
-      element.alt = t(key);
-    }
-  });
+  document
+    .querySelectorAll<HTMLImageElement>("[data-i18n-alt]")
+    .forEach((element) => {
+      const key = element.dataset.i18nAlt as TranslationKey | undefined;
+      if (key) {
+        element.alt = t(key);
+      }
+    });
 
   elements.languageEn.classList.toggle("is-active", state.language === "en");
   elements.languageZh.classList.toggle("is-active", state.language === "zh");
-  elements.languageEn.setAttribute("aria-pressed", String(state.language === "en"));
-  elements.languageZh.setAttribute("aria-pressed", String(state.language === "zh"));
+  elements.languageEn.setAttribute(
+    "aria-pressed",
+    String(state.language === "en"),
+  );
+  elements.languageZh.setAttribute(
+    "aria-pressed",
+    String(state.language === "zh"),
+  );
   elements.appVersion.textContent = APP_VERSION;
   if (state.updateStatus) {
-    renderUpdateStatus(t(state.updateStatus.key, state.updateStatus.values), state.updateStatus.tone);
+    renderUpdateStatus(
+      t(state.updateStatus.key, state.updateStatus.values),
+      state.updateStatus.tone,
+    );
   }
-  renderCookiesFile(state.cookiesFile);
+  renderCookiesFile(state.cookiesFile, state.cookiesOrigin);
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
@@ -613,6 +346,9 @@ function applyTranslations() {
   if (state.releaseNotesOpen) {
     renderReleaseNotes();
   }
+  queue.render();
+  playlist.render();
+  updateDownloadOptions();
 }
 
 function setLanguage(language: Language) {
@@ -630,19 +366,6 @@ function setGithubAccessMode(accessMode: GithubAccessMode) {
   clearUpdateStatus();
   updateGithubAccessButtons();
   updateButtons();
-}
-
-function setSettingsOpen(isOpen: boolean) {
-  elements.settingsDrawer.hidden = !isOpen;
-  elements.settingsBackdrop.hidden = !isOpen;
-  elements.settingsDrawer.setAttribute("aria-hidden", String(!isOpen));
-  document.body.classList.toggle("settings-open", isOpen);
-
-  if (isOpen) {
-    elements.settingsClose.focus();
-  } else {
-    elements.settingsToggle.focus();
-  }
 }
 
 function maybeShowReleaseNotesAfterUpdate() {
@@ -674,6 +397,7 @@ function setReleaseNotesOpen(isOpen: boolean) {
   elements.releaseNotesBackdrop.hidden = !isOpen;
   elements.releaseNotesDialog.setAttribute("aria-hidden", String(!isOpen));
   document.body.classList.toggle("modal-open", isOpen);
+  elements.appShell.inert = isOpen;
 
   if (isOpen) {
     elements.releaseNotesClose.focus();
@@ -699,43 +423,125 @@ function renderReleaseNotes() {
 }
 
 function bindEvents() {
+  elements.retryStartup.addEventListener("click", () => void bootstrap());
   elements.parse.addEventListener("click", () => void parseCurrentUrl());
-  elements.download.addEventListener("click", () => void downloadCurrentVideo());
-  elements.cancel.addEventListener("click", () => void cancelCurrentDownload());
-  elements.chooseCookies.addEventListener("click", () => void chooseCookiesFile());
-  elements.clearCookies.addEventListener("click", () => void clearCookiesFile());
-  elements.settingsToggle.addEventListener("click", () => setSettingsOpen(true));
-  elements.settingsClose.addEventListener("click", () => setSettingsOpen(false));
-  elements.settingsBackdrop.addEventListener("click", () => setSettingsOpen(false));
+  elements.download.addEventListener(
+    "click",
+    () => void enqueueCurrentSelection(),
+  );
+  must("#scope-video").addEventListener(
+    "click",
+    () => void parseCurrentUrl("video"),
+  );
+  must("#scope-playlist").addEventListener(
+    "click",
+    () => void parseCurrentUrl("playlist"),
+  );
+  must("#media-mode").addEventListener("change", () => {
+    updateDownloadOptions(true);
+    updateButtons();
+  });
+  elements.cancel.addEventListener(
+    "click",
+    () => void cancelCurrentOperation(),
+  );
+  elements.chooseCookies.addEventListener(
+    "click",
+    () => void chooseCookiesFile(),
+  );
+  elements.clearCookies.addEventListener(
+    "click",
+    () => void clearCookiesFile(),
+  );
   elements.languageEn.addEventListener("click", () => setLanguage("en"));
   elements.languageZh.addEventListener("click", () => setLanguage("zh"));
-  elements.toolSourceManaged.addEventListener("click", () => void setToolchainSource("managed"));
-  elements.toolSourceLocal.addEventListener("click", () => void setToolchainSource("local"));
-  elements.chooseLocalYtDlp.addEventListener("click", () => void chooseLocalTool("yt-dlp"));
-  elements.chooseLocalFfmpeg.addEventListener("click", () => void chooseLocalTool("ffmpeg"));
-  elements.chooseLocalDeno.addEventListener("click", () => void chooseLocalTool("deno"));
-  elements.autoDetectLocalTools.addEventListener("click", () => void autoDetectLocalTools());
+  elements.toolSourceManaged.addEventListener(
+    "click",
+    () => void setToolchainSource("managed"),
+  );
+  elements.toolSourceLocal.addEventListener(
+    "click",
+    () => void setToolchainSource("local"),
+  );
+  elements.chooseLocalYtDlp.addEventListener(
+    "click",
+    () => void chooseLocalTool("yt-dlp"),
+  );
+  elements.chooseLocalFfmpeg.addEventListener(
+    "click",
+    () => void chooseLocalTool("ffmpeg"),
+  );
+  elements.chooseLocalDeno.addEventListener(
+    "click",
+    () => void chooseLocalTool("deno"),
+  );
+  elements.autoDetectLocalTools.addEventListener(
+    "click",
+    () => void autoDetectLocalTools(),
+  );
   elements.verifyTools.addEventListener("click", () => void verifyTools());
-  elements.checkToolUpdates.addEventListener("click", () => void checkToolUpdates());
+  elements.checkToolUpdates.addEventListener(
+    "click",
+    () => void checkToolUpdates(),
+  );
   elements.installTools.addEventListener("click", () => void installTools());
-  elements.reinstallTools.addEventListener("click", () => void reinstallTools());
-  elements.openFolder.addEventListener("click", () => void openDownloadFolder());
-  elements.browseFolder.addEventListener("click", () => void browseDownloadFolder());
-  elements.saveFolder.addEventListener("click", () => void saveDownloadFolder());
-  elements.resetFolder.addEventListener("click", () => void resetDownloadFolder());
+  elements.reinstallTools.addEventListener(
+    "click",
+    () => void reinstallTools(),
+  );
+  elements.openFolder.addEventListener(
+    "click",
+    () => void openDownloadFolder(),
+  );
+  elements.browseFolder.addEventListener(
+    "click",
+    () => void browseDownloadFolder(),
+  );
+  elements.saveFolder.addEventListener(
+    "click",
+    () => void saveDownloadFolder(),
+  );
+  elements.resetFolder.addEventListener(
+    "click",
+    () => void resetDownloadFolder(),
+  );
   elements.checkUpdates.addEventListener("click", () => void checkForUpdates());
-  elements.releaseLink.addEventListener("click", () => void openLatestRelease());
-  elements.releaseNotesButton.addEventListener("click", () => showReleaseNotes());
-  elements.githubLink.addEventListener("click", () => void openProjectRepository());
-  elements.githubDirect.addEventListener("click", () => setGithubAccessMode("direct"));
-  elements.githubProxy.addEventListener("click", () => setGithubAccessMode("gh-proxy"));
+  elements.releaseLink.addEventListener(
+    "click",
+    () => void openLatestRelease(),
+  );
+  elements.releaseNotesButton.addEventListener("click", () =>
+    showReleaseNotes(),
+  );
+  elements.githubLink.addEventListener(
+    "click",
+    () => void openProjectRepository(),
+  );
+  elements.githubDirect.addEventListener("click", () =>
+    setGithubAccessMode("direct"),
+  );
+  elements.githubProxy.addEventListener("click", () =>
+    setGithubAccessMode("gh-proxy"),
+  );
+  elements.proxyMode.addEventListener("change", updateButtons);
+  elements.saveProxy.addEventListener("click", () => void saveProxyConfig());
   elements.thumbnail.addEventListener("load", () => showLoadedThumbnail());
-  elements.thumbnail.addEventListener("error", () => loadNextThumbnailCandidate());
-  elements.releaseNotesClose.addEventListener("click", () => closeReleaseNotes());
-  elements.releaseNotesDone.addEventListener("click", () => closeReleaseNotes());
-  elements.releaseNotesBackdrop.addEventListener("click", () => closeReleaseNotes());
+  elements.thumbnail.addEventListener("error", () =>
+    loadNextThumbnailCandidate(),
+  );
+  elements.releaseNotesClose.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
+  elements.releaseNotesDone.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
+  elements.releaseNotesBackdrop.addEventListener("click", () =>
+    closeReleaseNotes(),
+  );
   elements.quality.addEventListener("change", () => {
-    state.selectedFormat = state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
+    state.selectedFormat =
+      state.metadata?.format_options[elements.quality.selectedIndex] ?? null;
+    updateDownloadOptions();
     updateButtons();
   });
   elements.url.addEventListener("input", () => {
@@ -751,6 +557,17 @@ function bindEvents() {
     }
   });
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Tab" && state.releaseNotesOpen) {
+      const buttons = [elements.releaseNotesClose, elements.releaseNotesDone];
+      if (event.shiftKey && document.activeElement === buttons[0]) {
+        event.preventDefault();
+        buttons[1].focus();
+      } else if (!event.shiftKey && document.activeElement === buttons[1]) {
+        event.preventDefault();
+        buttons[0].focus();
+      }
+      return;
+    }
     if (event.key !== "Escape") {
       return;
     }
@@ -760,12 +577,19 @@ function bindEvents() {
       return;
     }
 
-    if (!elements.settingsDrawer.hidden) {
-      setSettingsOpen(false);
+    if (navigation.current() === "settings") {
+      navigation.back();
       return;
     }
 
-    const latestToast = elements.toastRegion.firstElementChild;
+    if (navigation.current() === "queue" && queue.closeDetail()) {
+      event.preventDefault();
+      return;
+    }
+
+    const latestToast = Array.from(elements.toastRegion.children).find(
+      (toast) => !toast.classList.contains("is-leaving"),
+    );
     if (latestToast instanceof HTMLElement) {
       dismissToast(latestToast);
     }
@@ -773,11 +597,34 @@ function bindEvents() {
 }
 
 async function bootstrap() {
+  if (state.busy) {
+    return;
+  }
+  setBusy(true);
+  elements.retryStartup.hidden = true;
   elements.progressText.textContent = t("progress.idle");
   renderEmptyPreview(t("preview.emptyStart"));
   logEvent(t("event.booted"));
-  await loadAppState();
-  maybeShowReleaseNotesAfterUpdate();
+  try {
+    await loadAppState();
+    if (!queueInitialized) {
+      await queue.initialize();
+      queueInitialized = true;
+    }
+    maybeShowReleaseNotesAfterUpdate();
+    state.initialized = true;
+  } catch (error) {
+    state.initialized = false;
+    state.toolsReady = false;
+    const message = t("notice.startupFailed", { message: String(error) });
+    elements.progressText.textContent = message;
+    elements.retryStartup.hidden = false;
+    showNotice(message, "error");
+    logEvent(message);
+    return;
+  } finally {
+    setBusy(false);
+  }
   await verifyTools({ quietReady: true });
 }
 
@@ -787,9 +634,14 @@ async function loadAppState() {
 }
 
 function applyAppState(appState: AppState) {
+  elements.proxyMode.value = appState.proxy?.mode ?? "system";
+  elements.proxyUrl.value = appState.proxy?.url ?? "";
   elements.folderText.textContent = appState.download_directory;
   elements.folderInput.value = appState.download_directory;
-  elements.toolRoot.textContent = appState.tools_root || t("settings.toolsPathPending");
+  elements.homeDirectory.textContent = appState.download_directory;
+  elements.directoryPreview.textContent = appState.download_directory;
+  elements.toolRoot.textContent =
+    appState.tools_root || t("settings.toolsPathPending");
   state.toolchainRevision = appState.toolchain_revision ?? null;
   state.toolchainSource = appState.toolchain_source;
   state.localToolchain = appState.local_toolchain;
@@ -797,290 +649,72 @@ function applyAppState(appState: AppState) {
   renderToolchainRevision();
   renderToolchainSource();
   renderLocalToolchainPaths();
-  renderCookiesFile(appState.cookies_file ?? null);
+  renderCookiesFile(
+    appState.cookies_file ?? null,
+    appState.cookies_origin ?? null,
+  );
 }
 
-async function setToolchainSource(source: ToolchainSource) {
-  if (state.busy || source === state.toolchainSource) {
-    return;
-  }
-
-  const previousSource = state.toolchainSource;
-  let changed = false;
-  setBusy(true, undefined, "tools");
-  try {
-    const appState = await invoke<AppState>("set_toolchain_source", { source });
-    state.toolsReady = false;
-    state.toolAction = null;
-    state.pendingToolManifestJson = null;
-    elements.toolList.replaceChildren();
-    applyAppState(appState);
-    invalidateParsedVideo(t("preview.toolsChanged"));
-    logEvent(t(source === "local" ? "event.localToolsSelected" : "event.managedToolsSelected"));
-    changed = true;
-  } catch (error) {
-    const message = String(error);
-    state.toolchainSource = previousSource;
-    renderToolchainSource();
-    showNotice(t("settings.toolSourceFailed", { message }), "error");
-  } finally {
-    setBusy(false);
-  }
-
-  if (changed) {
-    await verifyTools();
-  }
-}
-
-async function chooseLocalTool(tool: "yt-dlp" | "ffmpeg" | "deno") {
-  if (state.busy || state.toolchainSource !== "local") {
-    return;
-  }
-
-  const directory = tool === "ffmpeg";
-  const selected = await open({
-    multiple: false,
-    directory,
-    ...(directory
-      ? {}
-      : {
-          filters: [{ name: "Executable", extensions: ["exe"] }],
-        }),
-  });
-  if (typeof selected !== "string") {
-    return;
-  }
-
-  const config = { ...state.localToolchain };
-  if (tool === "yt-dlp") {
-    config.ytDlpPath = selected;
-  } else if (tool === "ffmpeg") {
-    config.ffmpegDirectory = selected;
-  } else {
-    config.denoPath = selected;
-  }
-  await saveLocalToolchain(config);
-}
-
-async function saveLocalToolchain(config: LocalToolchainConfig) {
-  let saved = false;
-  setBusy(true, undefined, "tools");
-  try {
-    const appState = await invoke<AppState>("set_local_toolchain", {
-      config: {
-        ytDlpPath: config.ytDlpPath ?? null,
-        ffmpegDirectory: config.ffmpegDirectory ?? null,
-        denoPath: config.denoPath ?? null,
-      },
-    });
-    state.toolsReady = false;
-    applyAppState(appState);
-    invalidateParsedVideo(t("preview.toolsChanged"));
-    saved = true;
-  } catch (error) {
-    showNotice(t("settings.localToolSaveFailed", { message: String(error) }), "error");
-  } finally {
-    setBusy(false);
-  }
-
-  if (saved) {
-    await verifyTools();
-  }
-}
-
-async function autoDetectLocalTools() {
-  if (state.busy || state.toolchainSource !== "local") {
-    return;
-  }
-
-  let detected = false;
-  setBusy(true, undefined, "tools");
-  elements.toolInstallStatus.textContent = t("settings.detectingLocalTools");
-  try {
-    const appState = await invoke<AppState>("auto_detect_local_toolchain");
-    state.toolsReady = false;
-    applyAppState(appState);
-    invalidateParsedVideo(t("preview.toolsChanged"));
-    detected = true;
-  } catch (error) {
-    showNotice(t("settings.localToolDetectFailed", { message: String(error) }), "error");
-  } finally {
-    setBusy(false);
-  }
-
-  if (detected) {
-    await verifyTools();
-  }
-}
-
-async function verifyTools(options: { quietReady?: boolean } = {}) {
-  setBusy(true, undefined, "tools");
-  state.pendingToolManifestJson = null;
-  elements.toolInstallStatus.textContent = t("settings.toolsChecking");
-  try {
-    const tools = await invoke<ToolStatus[]>("check_tools");
-    applyToolSummary(
-      tools,
-      state.toolchainSource === "local" ? "local" : "managed",
-      options,
-    );
-  } catch (error) {
-    state.toolsReady = false;
-    state.toolAction = state.toolchainSource === "managed" ? "install" : null;
-    const message = String(error);
-    elements.toolInstallStatus.textContent = message || t("settings.toolCheckFailed");
-    showNotice(message || t("settings.toolCheckFailed"), "error");
-    updateToolActionButton();
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function installTools() {
-  if (state.busy || state.toolchainSource !== "managed" || !state.toolAction) {
-    return;
-  }
-
-  if (state.toolAction === "reinstall") {
-    await reinstallTools();
-    return;
-  }
-
-  setBusy(true, undefined, "tools");
-  elements.toolInstallStatus.textContent = t(toolActionStatusKey(state.toolAction));
-  try {
-    const tools = state.pendingToolManifestJson
-      ? await invoke<ToolStatus[]>("install_tools_from_manifest", {
-          manifestJson: state.pendingToolManifestJson,
-          githubAccessMode: state.githubAccessMode,
-        })
-      : await invoke<ToolStatus[]>("install_tools", { githubAccessMode: state.githubAccessMode });
-    state.pendingToolManifestJson = null;
-    await loadAppState();
-    applyToolSummary(tools, "managed");
-    elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
-    showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
-    logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
-  } catch (error) {
-    const message = String(error);
-    elements.toolInstallStatus.textContent = message || t("settings.toolInstallFailed");
-    showNotice(message || t("settings.toolInstallFailed"), "error");
-    logEvent(`${t("event.toolInstallFailed")} ${message}`.trim());
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function checkToolUpdates() {
-  if (state.busy || state.toolchainSource !== "managed") {
-    return;
-  }
-
-  setBusy(true, undefined, "tools");
-  state.pendingToolManifestJson = null;
-  if (state.toolAction === "update") {
-    state.toolAction = null;
-    updateToolActionButton();
-  }
-  elements.toolInstallStatus.textContent = t("settings.toolUpdatesChecking");
-  try {
-    const manifestResult = await invoke<RemoteToolManifest>("fetch_latest_tool_manifest", {
-      githubAccessMode: state.githubAccessMode,
-    });
-
-    if (manifestResult.status === "no_release") {
-      elements.toolInstallStatus.textContent = t("updates.noRelease");
-      showNotice(t("updates.noRelease"), "warning");
-      return;
-    }
-
-    if (manifestResult.status === "no_manifest") {
-      elements.toolInstallStatus.textContent = t("settings.toolUpdatesNoManifest");
-      showNotice(t("settings.toolUpdatesNoManifest"), "warning");
-      return;
-    }
-
-    if (
-      !manifestResult.manifestJson ||
-      !manifestResult.source ||
-      (manifestResult.source === "archive" && !manifestResult.revision)
-    ) {
-      elements.toolInstallStatus.textContent = t("settings.toolUpdatesInvalidManifest");
-      showNotice(t("settings.toolUpdatesInvalidManifest"), "warning");
-      return;
-    }
-
-    const manifestJson = manifestResult.manifestJson;
-    const tools = await invoke<ToolStatus[]>("check_tools_with_manifest", { manifestJson });
-    const summary = applyToolSummary(tools, "remote", { remoteRevision: manifestResult.revision });
-    if (summary.action) {
-      state.pendingToolManifestJson = manifestJson;
-      updateToolActionButton();
-    } else {
-      elements.toolInstallStatus.textContent = t("settings.toolUpdatesCurrent");
-      logEvent(t("event.toolUpdatesCurrent"));
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    elements.toolInstallStatus.textContent = t("settings.toolUpdatesFailed", { message });
-    showNotice(t("settings.toolUpdatesFailed", { message }), "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function reinstallTools() {
-  if (state.busy || state.toolchainSource !== "managed") {
-    return;
-  }
-
-  const path = elements.toolRoot.textContent || t("settings.toolsPathPending");
-  if (!window.confirm(t("settings.reinstallConfirm", { path }))) {
-    return;
-  }
-
-  setBusy(true, undefined, "tools");
-  elements.toolInstallStatus.textContent = t("settings.reinstallingTools");
-  try {
-    const tools = await invoke<ToolStatus[]>("reinstall_tools", {
-      manifestJson: null,
-      githubAccessMode: state.githubAccessMode,
-    });
-    await loadAppState();
-    applyToolSummary(tools, "managed");
-    elements.toolInstallStatus.textContent = state.toolsReady ? t("settings.toolsInstalled") : t("settings.toolsInstallPartial");
-    showNotice(state.toolsReady ? t("notice.toolsInstalled") : t("notice.toolInstallNeedsAttention"), state.toolsReady ? "success" : "warning");
-    logEvent(state.toolsReady ? t("event.toolsInstalled") : t("event.toolsPartial"));
-  } catch (error) {
-    const message = String(error);
-    elements.toolInstallStatus.textContent = message || t("settings.toolInstallFailed");
-    showNotice(message || t("settings.toolInstallFailed"), "error");
-    logEvent(`${t("event.toolInstallFailed")} ${message}`.trim());
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function parseCurrentUrl() {
+async function parseCurrentUrl(scope?: "video" | "playlist") {
   const url = elements.url.value.trim();
-  if (!url || state.busy) {
+  if (!url || state.busy || !state.initialized || !state.toolsReady) {
+    return;
+  }
+
+  const inferred = scope ?? linkScope(url);
+  if (inferred === "choice") {
+    invalidateParsedVideo(t("preview.emptyStart"));
+    showingScope = true;
+    must<HTMLElement>("#scope-chooser").hidden = false;
+    updateButtons();
+    return;
+  }
+  showingScope = false;
+  must<HTMLElement>("#scope-chooser").hidden = true;
+  if (inferred === "playlist") {
+    invalidateParsedVideo(t("preview.readingMetadata"));
+    state.lastUrl = url;
+    updateDownloadOptions(true);
+    await playlist.parse(url);
     return;
   }
 
   setBusy(true, t("progress.parsing"), "metadata");
-  renderEmptyPreview(t("preview.readingMetadata"));
+  invalidateParsedVideo(t("preview.readingMetadata"));
   try {
     const metadata = await invoke<VideoMetadata>("parse_metadata", { url });
+    if (elements.url.value.trim() !== url) {
+      elements.progressText.textContent = t("progress.idle");
+      return;
+    }
+    if (state.cancelRequested) throw "Operation cancelled.";
+    if (metadata.is_playlist) {
+      if (scope === "video") throw new Error(t("scope.videoUnavailable"));
+      state.lastUrl = url;
+      await playlist.parse(url);
+      return;
+    }
     state.metadata = metadata;
     state.lastUrl = url;
     state.selectedFormat = metadata.format_options[0] ?? null;
     renderMetadata(metadata);
-    renderQualityOptions(metadata.format_options);
+    updateDownloadOptions(true);
     elements.progressText.textContent = t("progress.metadataReady");
     showNotice(t("notice.metadataParsed"), "success");
     logEvent(t("event.parsed", { title: metadata.title }));
   } catch (error) {
-    renderEmptyPreview(t("preview.parseFailed"));
+    if (elements.url.value.trim() !== url) {
+      elements.progressText.textContent = t("progress.idle");
+      return;
+    }
+    if (error === "Operation cancelled.") {
+      invalidateParsedVideo(t("progress.metadataCancelled"));
+      elements.progressText.textContent = t("progress.metadataCancelled");
+      showNotice(t("notice.metadataCancelled"), "warning");
+      logEvent(t("event.metadataCancelled"));
+      return;
+    }
+    invalidateParsedVideo(t("preview.parseFailed"));
     elements.progressText.textContent = t("progress.metadataFailed");
     showNotice(String(error), "error");
     logEvent(t("event.metadataFailed"));
@@ -1089,47 +723,123 @@ async function parseCurrentUrl() {
   }
 }
 
-async function downloadCurrentVideo() {
-  const metadata = state.metadata;
-  const selectedFormat = state.selectedFormat;
-  const url = state.lastUrl || elements.url.value.trim();
-  if (!metadata || !selectedFormat || !url || state.busy) {
-    return;
-  }
-
-  setBusy(true, t("progress.startingDownload", { quality: selectedFormat.label }), "download");
-  elements.progress.removeAttribute("value");
+async function enqueueCurrentSelection() {
+  if (state.busy || enqueueing || !state.toolsReady) return;
+  const audio = must<HTMLSelectElement>("#media-mode").value === "audio";
+  const format = audio
+    ? { format_selector: "ba/b", label: t("download.audioOnly") }
+    : playlist.active
+      ? playlistQualities[elements.quality.selectedIndex]
+      : state.selectedFormat;
+  if (!format) return;
+  const label =
+    playlist.active && !audio && elements.quality.selectedIndex === 0
+      ? t("download.best")
+      : format.label;
+  const common = {
+    format_selector: format.format_selector,
+    label,
+    audio_only: audio,
+  };
+  const requests: DownloadInput[] = playlist.active
+    ? playlist.selected.map((item) => ({
+        ...common,
+        url: item.url!,
+        title: item.title,
+        video_id: item.id,
+        thumbnail_url: item.thumbnail_url,
+        playlist: {
+          url: playlist.url,
+          title: playlist.title,
+          index: item.index,
+        },
+      }))
+    : state.metadata
+      ? [
+          {
+            ...common,
+            url: state.metadata.webpage_url || state.lastUrl,
+            title: state.metadata.title,
+            video_id: state.metadata.id,
+            thumbnail_url: state.metadata.thumbnail_url,
+          },
+        ]
+      : [];
+  if (!requests.length) return;
+  enqueueing = true;
+  updateButtons();
   try {
-    const outputPath = await invoke<string | null>("download_video", {
-      request: {
-        url,
-        format_selector: selectedFormat.format_selector,
-        label: selectedFormat.label,
-      },
-    });
-    elements.progress.value = 100;
-    elements.progressText.textContent = outputPath ? t("progress.savedTo", { path: outputPath }) : t("progress.completedOpenFolder");
-    showNotice(t("notice.downloadCompleted"), "success");
-    logEvent(outputPath ? t("event.saved", { path: outputPath }) : t("event.downloadCompleted"));
+    await queue.enqueue(requests);
+    navigation.show("queue");
+    showNotice(t("download.added", { count: requests.length }), "success");
   } catch (error) {
-    const message = String(error);
-    elements.progress.value = 0;
-    if (message.toLowerCase().includes("cancel")) {
-      elements.progressText.textContent = t("progress.downloadCancelled");
-      showNotice(t("notice.downloadCancelled"), "warning");
-      logEvent(t("event.downloadCancelled"));
-    } else {
-      elements.progressText.textContent = t("progress.downloadFailed");
-      showNotice(message, "error");
-      logEvent(t("event.downloadFailed"));
-    }
+    showNotice(String(error), "error");
   } finally {
-    setBusy(false);
+    enqueueing = false;
+    updateButtons();
   }
 }
 
-async function cancelCurrentDownload() {
-  if (state.activeOperation !== "download" || state.cancelRequested) {
+function updateDownloadOptions(resetQuality = false) {
+  const audio = must<HTMLSelectElement>("#media-mode").value === "audio";
+  if (resetQuality || (playlist.active && !elements.quality.children.length)) {
+    const options = audio
+      ? [
+          {
+            label: t("download.audioOnly"),
+            format_selector: "ba/b",
+            extension: "",
+            is_best: true,
+          },
+        ]
+      : playlist.active
+        ? playlistQualities.map((format, index) => ({
+            ...format,
+            label: index === 0 ? t("download.best") : format.label,
+            extension: "mp4",
+            is_best: index === 0,
+          }))
+        : (state.metadata?.format_options ?? []);
+    renderQualityOptions(options);
+    if (!playlist.active && !audio) state.selectedFormat = options[0] ?? null;
+  }
+  const firstOption = elements.quality.children[0];
+  if (firstOption && audio) firstOption.textContent = t("download.audioOnly");
+  else if (firstOption && playlist.active)
+    firstOption.textContent = t("download.best");
+  must<HTMLElement>("#preview-panel").hidden = playlist.active;
+  must<HTMLElement>("#playlist-panel").hidden = !playlist.active;
+  must<HTMLElement>("#quality-hint").textContent = audio
+    ? t("download.audioHint")
+    : playlist.active
+      ? t("playlist.qualityHint")
+      : "";
+  const count = playlist.active
+    ? playlist.selected.length
+    : state.metadata
+      ? 1
+      : 0;
+  must<HTMLElement>("#selected-summary").textContent = t("download.selected", {
+    count,
+  });
+  const root = elements.folderText.textContent || "";
+  elements.directoryPreview.textContent =
+    playlist.active && playlist.directory
+      ? `${root}${root.includes("\\") ? "\\" : "/"}${playlist.directory}`
+      : root;
+  must<HTMLElement>("#filename-section").hidden = !playlist.active;
+  must<HTMLElement>("#filename-preview").replaceChildren(
+    ...playlist.selected.slice(0, 3).map((item) => {
+      const line = document.createElement("p");
+      line.textContent = `${item.filename || `${String(item.index).padStart(2, "0")} - ${item.title}`}.…`;
+      line.title = line.textContent;
+      return line;
+    }),
+  );
+}
+
+async function cancelCurrentOperation() {
+  if (state.activeOperation !== "metadata" || state.cancelRequested) {
     return;
   }
 
@@ -1137,7 +847,7 @@ async function cancelCurrentDownload() {
   elements.progressText.textContent = t("progress.cancelling");
   updateButtons();
   try {
-    await invoke("cancel_download");
+    await invoke("cancel_metadata");
     logEvent(t("event.cancelRequested"));
   } catch (error) {
     showNotice(String(error), "error");
@@ -1245,12 +955,36 @@ async function browseDownloadFolder() {
 
 async function saveDownloadFolder() {
   try {
-    const appState = await invoke<AppState>("set_download_directory", { directory: elements.folderInput.value });
+    const appState = await invoke<AppState>("set_download_directory", {
+      directory: elements.folderInput.value,
+    });
     elements.folderText.textContent = appState.download_directory;
     elements.folderInput.value = appState.download_directory;
+    elements.homeDirectory.textContent = appState.download_directory;
+    updateDownloadOptions();
     showNotice(t("notice.folderUpdated"), "success");
   } catch (error) {
     showNotice(String(error), "error");
+  }
+}
+
+async function saveProxyConfig() {
+  if (state.busy || !state.initialized || enqueueing) return;
+  const mode = elements.proxyMode.value as ProxyConfig["mode"];
+  const config: ProxyConfig = {
+    mode,
+    url: mode === "custom" ? elements.proxyUrl.value.trim() : null,
+  };
+  setBusy(true);
+  try {
+    const saved = await invoke<ProxyConfig>("set_proxy_config", { config });
+    elements.proxyMode.value = saved.mode;
+    elements.proxyUrl.value = saved.url ?? "";
+    showNotice(t("proxy.saved"), "success");
+  } catch (error) {
+    showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1259,6 +993,8 @@ async function resetDownloadFolder() {
     const appState = await invoke<AppState>("reset_download_directory");
     elements.folderText.textContent = appState.download_directory;
     elements.folderInput.value = appState.download_directory;
+    elements.homeDirectory.textContent = appState.download_directory;
+    updateDownloadOptions();
     showNotice(t("notice.folderReset"), "success");
   } catch (error) {
     showNotice(String(error), "error");
@@ -1270,6 +1006,8 @@ async function chooseCookiesFile() {
     return;
   }
 
+  const url = elements.url.value.trim();
+  setBusy(true);
   try {
     const selected = await open({
       title: t("cookies.chooseFile"),
@@ -1279,14 +1017,16 @@ async function chooseCookiesFile() {
     });
 
     if (typeof selected === "string") {
-      const appState = await invoke<AppState>("set_cookies_file", { path: selected });
-      renderCookiesFile(appState.cookies_file ?? null);
+      const appState = await invoke<AppState>("set_cookies_file", { path: selected, url });
+      renderCookiesFile(appState.cookies_file ?? null, appState.cookies_origin ?? null);
       invalidateParsedVideo(t("preview.cookiesChanged"));
       showNotice(t("notice.cookiesUpdated"), "success");
       logEvent(t("event.cookiesUpdated", { file: fileNameFromPath(appState.cookies_file || selected) }));
     }
   } catch (error) {
     showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1295,6 +1035,7 @@ async function clearCookiesFile() {
     return;
   }
 
+  setBusy(true);
   try {
     const appState = await invoke<AppState>("clear_cookies_file");
     renderCookiesFile(appState.cookies_file ?? null);
@@ -1303,6 +1044,8 @@ async function clearCookiesFile() {
     logEvent(t("event.cookiesCleared"));
   } catch (error) {
     showNotice(String(error), "error");
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -1328,11 +1071,15 @@ function renderEmptyPreview(message: string) {
 }
 
 function invalidateParsedVideo(message: string) {
+  playlist.reset();
+  showingScope = false;
+  must<HTMLElement>("#scope-chooser").hidden = true;
   state.metadata = null;
   state.selectedFormat = null;
   state.lastUrl = "";
   renderEmptyPreview(message);
   renderQualityOptions([]);
+  updateButtons();
 }
 
 function renderThumbnailCandidates(urls: string[]) {
@@ -1403,126 +1150,11 @@ function renderQualityOptions(options: VideoFormatOption[]) {
   elements.quality.disabled = options.length === 0;
 }
 
-function renderTools(tools: ToolStatus[]) {
-  elements.toolList.replaceChildren(
-    ...tools.map((tool) => {
-      const row = document.createElement("li");
-      row.className = `tool-row is-${tool.availability}`;
-      row.innerHTML = `
-        <span class="tool-dot"></span>
-        <span class="tool-name"></span>
-        <span class="tool-version"></span>
-      `;
-      row.querySelector(".tool-name")!.textContent = tool.name;
-      row.querySelector(".tool-version")!.textContent = formatToolVersion(tool);
-      row.title = formatToolTitle(tool);
-      return row;
-    }),
-  );
-}
-
-function renderToolchainRevision() {
-  elements.toolchainRevision.textContent =
-    state.toolchainRevision ?? t("settings.noActiveRevision");
-}
-
-function renderToolchainSource() {
-  const isLocal = state.toolchainSource === "local";
-  elements.toolSourceManaged.classList.toggle("is-active", !isLocal);
-  elements.toolSourceLocal.classList.toggle("is-active", isLocal);
-  elements.toolSourceManaged.setAttribute("aria-pressed", String(!isLocal));
-  elements.toolSourceLocal.setAttribute("aria-pressed", String(isLocal));
-  elements.managedToolchainDetails.hidden = isLocal;
-  elements.localToolchainPaths.hidden = !isLocal;
-  elements.toolchainHint.textContent = t(
-    isLocal ? "settings.localToolchainHint" : "settings.toolchainHint",
-  );
-  elements.autoDetectLocalTools.title = t("settings.usePathHint");
-  elements.checkToolUpdates.hidden = isLocal;
-  elements.reinstallTools.hidden = isLocal;
-  updateToolActionButton();
-}
-
-function renderLocalToolchainPaths() {
-  renderLocalToolPath(elements.localYtDlpPath, state.localToolchainPaths.ytDlpPath);
-  renderLocalToolPath(elements.localFfmpegPath, state.localToolchainPaths.ffmpegDirectory);
-  renderLocalToolPath(elements.localDenoPath, state.localToolchainPaths.denoPath);
-}
-
-function renderLocalToolPath(element: HTMLElement, path?: string | null) {
-  const value = path?.trim() || "";
-  element.textContent = value || t("settings.localPathNotDetected");
-  element.title = value || t("settings.localPathNotDetected");
-}
-
-function applyToolSummary(
-  tools: ToolStatus[],
-  mode: ToolSummaryMode,
-  options: { quietReady?: boolean; remoteRevision?: string | null } = {},
+function setBusy(
+  isBusy: boolean,
+  progressText?: string,
+  operation: "metadata" | "tools" | null = null,
 ) {
-  const summary =
-    mode === "remote"
-      ? summarizeRemoteTools(tools, state.toolchainRevision, options.remoteRevision ?? null)
-      : summarizeTools(tools, mode);
-  state.toolsReady = summary.ready;
-  state.toolAction = summary.action;
-  renderTools(tools);
-  updateToolActionButton();
-  elements.toolInstallStatus.textContent = t(summary.settingsKey);
-  if (!(options.quietReady && summary.ready)) {
-    showNotice(t(summary.noticeKey), summary.tone);
-  }
-  logEvent(t(summary.eventKey));
-  return summary;
-}
-
-function formatToolVersion(tool: ToolStatus) {
-  if (tool.availability === "outdated" && tool.expected_version) {
-    return `${tool.version || t("tool.currentUnknown")} -> ${tool.expected_version}`;
-  }
-  return tool.version || tool.error || tool.relative_path;
-}
-
-function formatToolTitle(tool: ToolStatus) {
-  return [
-    tool.full_path,
-    tool.expected_version ? `Expected ${tool.expected_version}` : null,
-    tool.error,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function updateDownloadProgress(progress: DownloadProgress) {
-  if (typeof progress.percent === "number") {
-    elements.progress.value = progress.percent;
-  } else {
-    elements.progress.removeAttribute("value");
-  }
-
-  elements.progressText.textContent = [
-    progress.status,
-    typeof progress.percent === "number" ? `${progress.percent.toFixed(1)}%` : null,
-    progress.speed,
-    progress.eta ? `${t("progress.eta")} ${progress.eta}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function updateToolInstallProgress(progress: ToolInstallProgress) {
-  elements.toolInstallStatus.textContent = [
-    progress.status,
-    typeof progress.percent === "number" ? `${progress.percent.toFixed(0)}%` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  if (typeof progress.percent !== "number" || progress.percent >= 100) {
-    logEvent(progress.tool ? `${progress.status}: ${progress.tool}` : progress.status);
-  }
-}
-
-function setBusy(isBusy: boolean, progressText?: string, operation: "metadata" | "download" | "tools" | null = null) {
   state.busy = isBusy;
   state.activeOperation = isBusy ? operation : null;
   if (!isBusy) {
@@ -1534,62 +1166,95 @@ function setBusy(isBusy: boolean, progressText?: string, operation: "metadata" |
   updateButtons();
 }
 
-function updateToolActionButton() {
-  elements.installTools.hidden =
-    state.toolchainSource === "local" || state.toolAction === null;
-  if (!state.toolAction) {
-    return;
-  }
-
-  const labelKey =
-    state.toolAction === "reinstall"
-      ? "action.reinstallTools"
-      : state.toolAction === "update"
-        ? "action.updateTools"
-        : "action.installTools";
-  elements.installTools.textContent = t(labelKey);
-}
-
-function toolActionStatusKey(action: ToolAction | null): TranslationKey {
-  if (action === "reinstall") {
-    return "settings.reinstallingTools";
-  }
-  if (action === "update") {
-    return "settings.updatingTools";
-  }
-  return "settings.installingTools";
-}
-
-function renderCookiesFile(file: string | null) {
+function renderCookiesFile(file: string | null, origin: string | null = null) {
   state.cookiesFile = file?.trim() || null;
-  elements.cookiesFile.textContent = state.cookiesFile ? fileNameFromPath(state.cookiesFile) : t("cookies.none");
-  elements.cookiesFile.title = state.cookiesFile || t("cookies.none");
+  state.cookiesOrigin = origin;
+  elements.cookiesFile.textContent = state.cookiesFile
+    ? [fileNameFromPath(state.cookiesFile), origin].filter(Boolean).join(" · ")
+    : t("cookies.none");
+  elements.cookiesFile.title = state.cookiesFile
+    ? [state.cookiesFile, origin].filter(Boolean).join("\n")
+    : t("cookies.none");
   updateButtons();
 }
 
 function updateButtons() {
+  const hasContent = Boolean(state.metadata) || playlist.active;
+  elements.workspace.hidden = !hasContent;
+  elements.newView.classList.toggle("has-content", hasContent);
+  elements.newView.classList.toggle("has-scope", showingScope);
+  elements.emptyHints.hidden = hasContent || state.busy || showingScope;
+  elements.toolsRequired.hidden =
+    !state.initialized || state.toolsReady || state.activeOperation === "tools";
+  elements.appToolStatus.textContent = t(
+    state.toolsReady ? "settings.toolsAvailable" : "settings.toolsMissing",
+  );
+  elements.operationStatus.hidden =
+    !state.busy &&
+    elements.retryStartup.hidden &&
+    Boolean(
+      hasContent ||
+        !elements.progressText.textContent ||
+        elements.progressText.textContent === t("progress.idle"),
+    );
+  elements.progress.hidden = true;
+  elements.cancel.hidden = state.activeOperation !== "metadata";
+  const configurationUnavailable = state.busy || !state.initialized;
   const hasUrl = elements.url.value.trim().length > 0;
-  elements.parse.disabled = state.busy || !hasUrl || !state.toolsReady;
-  elements.download.disabled = state.busy || !state.metadata || !state.selectedFormat || !state.toolsReady;
-  elements.cancel.disabled = state.activeOperation !== "download" || state.cancelRequested;
-  elements.chooseCookies.disabled = state.busy;
-  elements.clearCookies.disabled = state.busy || !state.cookiesFile;
-  elements.toolSourceManaged.disabled = state.busy;
-  elements.toolSourceLocal.disabled = state.busy;
-  elements.chooseLocalYtDlp.disabled = state.busy || state.toolchainSource !== "local";
-  elements.chooseLocalFfmpeg.disabled = state.busy || state.toolchainSource !== "local";
-  elements.chooseLocalDeno.disabled = state.busy || state.toolchainSource !== "local";
-  elements.autoDetectLocalTools.disabled = state.busy || state.toolchainSource !== "local";
-  elements.verifyTools.disabled = state.busy;
-  elements.checkToolUpdates.disabled = state.busy || state.toolchainSource !== "managed";
-  elements.installTools.disabled = state.busy || !state.toolAction;
-  elements.reinstallTools.disabled = state.busy || state.toolchainSource !== "managed";
-  elements.browseFolder.disabled = state.busy;
-  elements.saveFolder.disabled = state.busy;
-  elements.resetFolder.disabled = state.busy;
+  elements.retryStartup.disabled = state.busy;
+  elements.parse.disabled =
+    configurationUnavailable || !hasUrl || !state.toolsReady;
+  elements.download.disabled =
+    configurationUnavailable ||
+    enqueueing ||
+    !state.toolsReady ||
+    (playlist.active
+      ? playlist.selected.length === 0
+      : !state.metadata ||
+        (!state.selectedFormat &&
+          must<HTMLSelectElement>("#media-mode").value !== "audio"));
+  elements.quality.disabled =
+    configurationUnavailable ||
+    !hasContent ||
+    must<HTMLSelectElement>("#media-mode").value === "audio";
+  must<HTMLSelectElement>("#media-mode").disabled = configurationUnavailable;
+  const toolsUnavailable = configurationUnavailable || queue.unfinished;
+  must<HTMLElement>("#queue-tool-lock").hidden = !queue.unfinished;
+  elements.cancel.disabled =
+    state.activeOperation !== "metadata" || state.cancelRequested;
+  elements.chooseCookies.disabled = configurationUnavailable;
+  elements.clearCookies.disabled =
+    configurationUnavailable || !state.cookiesFile;
+  elements.toolSourceManaged.disabled = toolsUnavailable;
+  elements.toolSourceLocal.disabled = toolsUnavailable;
+  elements.chooseLocalYtDlp.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.chooseLocalFfmpeg.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.chooseLocalDeno.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.autoDetectLocalTools.disabled =
+    toolsUnavailable || state.toolchainSource !== "local";
+  elements.verifyTools.disabled = configurationUnavailable;
+  elements.checkToolUpdates.disabled =
+    configurationUnavailable || state.toolchainSource !== "managed";
+  elements.installTools.disabled = toolsUnavailable || !state.toolAction;
+  elements.reinstallTools.disabled =
+    toolsUnavailable || state.toolchainSource !== "managed";
+  elements.openFolder.disabled = configurationUnavailable;
+  elements.browseFolder.disabled = configurationUnavailable;
+  elements.saveFolder.disabled = configurationUnavailable;
+  elements.resetFolder.disabled = configurationUnavailable;
+  elements.proxyMode.disabled = configurationUnavailable || enqueueing;
+  elements.proxyUrl.disabled =
+    configurationUnavailable || enqueueing || elements.proxyMode.value !== "custom";
+  elements.saveProxy.disabled = configurationUnavailable || enqueueing;
   elements.checkUpdates.disabled = state.updateChecking;
   elements.githubDirect.disabled = state.updateChecking;
   elements.githubProxy.disabled = state.updateChecking;
+  for (const id of ["scope-video", "scope-playlist"])
+    must<HTMLButtonElement>(`#${id}`).disabled =
+      configurationUnavailable || !state.toolsReady;
 }
 
 function showNotice(message: string, tone: NoticeTone) {
@@ -1624,6 +1289,7 @@ function showNotice(message: string, tone: NoticeTone) {
 
   toast.append(indicator, copy, close);
   elements.toastRegion.prepend(toast);
+  elements.toastRegion.scrollTop = 0;
   trimToastStack();
   scheduleToastDismiss(toast, tone);
 }

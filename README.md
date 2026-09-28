@@ -24,19 +24,28 @@
   <img alt="yt-dlp-tauri English interface" src="./docs/assets/readme-en.png" width="920" />
 </p>
 
+<p align="center">
+  <img alt="Download queue with independent requests" src="./docs/assets/queue-en.png" width="920" />
+</p>
+
 ---
 
 ## What is yt-dlp-tauri?
 
-`yt-dlp-tauri` is a small desktop app for downloading videos with `yt-dlp` without writing command-line options by hand. Paste a video URL from a [site supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), preview the metadata, choose a quality, and download an MP4-friendly file from a focused desktop UI.
+`yt-dlp-tauri` is a small desktop app for downloading videos with `yt-dlp` without writing command-line options by hand. Paste a video or playlist URL from a [site supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md), select content and quality, and manage each download as an independent request.
 
 The project is desktop-first and local-first. It is not a hosted downloader service, does not provide multi-user accounts, and is not affiliated with `yt-dlp`, FFmpeg, Deno, or Tauri.
 
 ## Features
 
 - Parse video metadata through `yt-dlp` and preview title, thumbnail, duration, source URL, description, and quality options.
-- Download with live progress, speed, ETA, cancellation, and a saved output folder.
+- Cancel metadata parsing at any time; parsing also stops automatically after 120 seconds.
+- Select playlist items by original number, invert selections, or select all loaded items; load long lists in pages of 50.
+- Manage live progress, speed, ETA, cancellation, retry, and output actions per request, with 1–3 simultaneous downloads.
+- Choose video with audio or audio-only output; playlist video quality is a resolution limit applied to each request.
+- Show configuration errors during startup and retry initialization after the reported problem is corrected.
 - Use Cookie files for authenticated sites, including Netscape `cookies.txt` and one-line browser Cookie headers.
+- Configure system/environment, direct, or custom HTTP(S)/SOCKS proxy connections for media parsing and downloads.
 - Install, update, reinstall, and verify complete app-managed toolchain revisions from Settings.
 - Switch between the app-managed toolchain and trusted local tools discovered from `PATH` or selected by absolute path.
 - Resolve the stable toolchain from project-controlled immutable GitHub Release assets.
@@ -99,6 +108,19 @@ The configured bundle target is `nsis`. Build output is written under:
 src-tauri\target\release\bundle\nsis\
 ```
 
+## Download workflow
+
+1. Open **New download**, paste a link, and parse it. For a link that includes both a video and a list, choose **Current video** or **Playlist or episodes**.
+2. For a playlist, load more pages as needed and select individual rows, all loaded items, or a range such as `3,5-7`. Selection keeps original item numbers, skips unavailable items, and does not automatically include later pages. Missing duration or thumbnail information is left unavailable.
+3. Choose video/audio mode and quality, confirm the destination, and click **Add to queue**. Each selected video becomes one request with its own URL, format and output location.
+4. Open **Download queue** to cancel or retry individual requests. A failed request does not block others. **Stop starting new requests** lets running requests finish and holds waiting requests until resumed.
+
+The queue and its 1–3 concurrency setting last for the current app session; the default is 1. Closing the app with unfinished work asks for confirmation. Queue records are not restored on restart. Clearing finished records only removes their entries from the queue and leaves output files intact.
+
+Playlist downloads use a subfolder named after the playlist and filenames such as `03 - Title [video-id].mp4`. Original numbers are preserved. Unsupported filename characters are replaced, long components are bounded, and output extensions depend on the source and selected mode. Requests targeting the same base filename run serially and existing outputs are not overwritten. Retrying an interrupted download can reuse partial files supported by yt-dlp.
+
+Retry preserves the request's URL, format and destination and uses the **current** toolchain, Cookie selection and proxy setting. Changing the default folder, Cookie selection or proxy affects future requests; waiting requests keep the selection captured when added. Each running tool receives a private Cookie copy; the selected source file is read at startup of that operation and is not modified. Tool installation, replacement and source changes are blocked while requests remain unfinished.
+
 ## Configuration
 
 | Item | Purpose |
@@ -110,6 +132,7 @@ src-tauri\target\release\bundle\nsis\
 | `src-tauri/tauri.conf.json` | Tauri app metadata, fixed window size, bundle target, icons, and resources. |
 | `scripts/download-tools.ps1` | Optional development script that restores the pinned `win-x64` toolchain into the checkout. |
 | Settings: output folder | User-facing download directory selection, save, reset, and open actions. |
+| Settings: network proxy | Saved proxy selection for video/playlist parsing and downloads. |
 | Settings: GitHub site | `Direct` or `gh-proxy` mode for update checks and release links. Project home always opens GitHub directly. |
 | Settings: tool source | Switch between the verified app-managed revision and trusted local executables. |
 
@@ -117,6 +140,24 @@ Current release scope:
 
 - Supported tool target: `win-x64`.
 - Tool binaries are not committed to the repository.
+
+## Network proxy
+
+In **Settings → General → Network proxy**, choose a mode and click **Save**:
+
+- **System / environment** (default): keep yt-dlp's own proxy detection, including proxy environment variables. Detection depends on the selected yt-dlp build and operating system; automatic PAC configuration is not guaranteed.
+- **Direct connection**: explicitly bypass proxies for yt-dlp media requests.
+- **Custom proxy**: enter a complete address such as `http://127.0.0.1:7890` or `socks5h://127.0.0.1:1080`. Supported schemes are `http`, `https`, `socks4`, `socks4a`, `socks5`, and `socks5h`; SOCKS addresses require a port. Use `socks5h` to resolve destination names at the proxy. HTTPS proxy support depends on the selected yt-dlp build.
+
+The setting applies to subsequent video/playlist parsing, new download requests and retries. Queued and running requests retain their captured setting. Request details show that setting with URL credentials removed. GitHub update/release routing and WebView thumbnail requests use their existing network settings.
+
+Settings persist in `%LOCALAPPDATA%\yt-dlp-tauri\state\proxy.json`. Proxy URLs may include `username:password@host`; credentials are stored locally in plain text and passed to the selected yt-dlp executable. URL credentials are removed from queue summaries and proxy error URLs. Invalid addresses are rejected without replacing the saved configuration.
+
+## Cookie files
+
+Netscape `cookies.txt` files retain their own domain rules. For a one-line Cookie header, paste the video URL before selecting the file. The selection is bound to that exact origin (scheme, hostname, and port), shown beside the filename. To use a header on another origin, select the appropriate file again or clear the selection. Existing header selections must be selected once again after upgrading; they are never bound automatically.
+
+The path and optional origin are stored together in `%LOCALAPPDATA%\yt-dlp-tauri\state\cookies-file.json`. Existing `cookies-file.txt` selections remain readable until a selection is saved or cleared. Temporary converted headers use the exact hostname and are removed after the operation.
 
 ## Local Tool Mode
 

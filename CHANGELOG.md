@@ -2,7 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.0 - 2026-09-05
+
+### 中文
+
+- 新增网络代理设置：系统／环境代理、直接连接和自定义 HTTP(S)／SOCKS 代理，用于视频／播放列表解析及下载；配置持久保存，已入队请求保留原配置，重试读取最新配置。
+- 通知在页面底部独立显示，多条通知和长错误可滚动查看，保留解析与下载操作空间；请求详情支持 Esc 关闭并恢复键盘焦点。
+- 新版界面分为新建下载、下载队列和设置，保留中英文切换及工具管理能力。
+- 支持播放列表和分集的分页解析、全选已加载条目、反选与序号范围选择；加载中断后保留已有结果并可继续加载。
+- 每条选中视频作为独立下载请求，分别显示进度、取消、重试和打开输出；默认同时下载 1 条，可调整为 1–3 条，失败不阻塞后续请求。
+- 支持统一的分辨率上限和仅音频模式；播放列表输出到独立子目录，文件名保留原始序号。
+- 队列由后端管理并保留至应用关闭；停止启动新请求时，正在运行的请求继续执行。同名输出串行处理，不覆盖已有文件。
+- 每个请求使用独立的临时 Cookie 文件；队列存在未结束请求时禁止修改下载工具，重试使用当前工具和 Cookie 配置。
+- 启动失败时显示具体错误并支持重试；安装和重装仅显示一次结果通知。
+- 拆分翻译和工具链设置模块，清理未使用文案及重复校验，让 manifest 选择测试覆盖生产逻辑。
+- 修复修改 URL 或重新解析失败后仍可使用旧下载状态的问题；工具更新提示不再禁用当前可用工具链。
+- 已激活工具链缺少可执行文件时仍可检查并重装；受管工具在版本探测前先校验 SHA-256。
+- 一行 Cookie 绑定选择文件时的精确 URL 来源，跨站需重新选择；Netscape 文件继续使用自身域名规则。
+- 修复下载启动前取消失效的问题；视频解析支持取消和 120 秒超时，统一回收工具子进程并并发读取输出管道。
+
+### English
+
+- Add persistent network proxy settings for video/playlist parsing and downloads: system/environment, direct, and custom HTTP(S)/SOCKS proxies. Queued requests keep their captured setting; retries use the current setting.
+- Reserve a scrollable notification area below page content so stacked notices and long errors keep download controls accessible; close request details with Escape and restore keyboard focus.
+- Introduce separate New download, Download queue, and Settings pages while retaining bilingual UI and tool management.
+- Parse playlists and episodes in pages, select loaded items, invert selections, and choose item-number ranges; preserve partial results and resume loading after interruption.
+- Create an independent request for each selected video, with its own progress, cancel, retry, and output actions; run one request by default with a 1–3 concurrency setting, continuing after individual failures.
+- Add per-video resolution limits and audio-only output, with playlist subdirectories and filenames that preserve original item numbers.
+- Keep the queue in the backend for the current app session; stopping new requests lets running downloads finish. Serialize matching output names without overwriting existing files.
+- Isolate each request's temporary Cookie file, block tool changes while requests remain unfinished, and use current tools and Cookie selection when retrying.
+- Display startup errors with a retry action, and report installation and reinstallation results once.
+- Separate translations and toolchain settings, remove unused messages and redundant validation, and exercise production manifest selection in tests.
+- Discard stale video previews after URL changes or failed parsing, and keep the current working toolchain usable when an update is available.
+- Allow verification and reinstallation when an active toolchain is missing an executable, and verify managed executable hashes before running version probes.
+- Bind one-line Cookie headers to the exact URL origin selected by the user, requiring reselection across origins while preserving Netscape domain rules.
+- Preserve cancellation before download startup, add metadata cancellation and a 120-second timeout, and share process-tree cleanup with concurrent output draining across tool commands.
 
 ## 0.1.13 - 2026-07-14
 

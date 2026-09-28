@@ -4,23 +4,27 @@ Thanks for taking the time to improve `yt-dlp-tauri`.
 
 ## Development Setup
 
+Use Node.js 24 or later and the stable Rust toolchain.
+
 Install dependencies:
 
 ```bash
 npm install
 ```
 
-Run the frontend build:
+Run the frontend tests and production build:
 
 ```bash
+npm test
 npm run build
 ```
 
 Run Rust checks:
 
 ```bash
-cargo test --manifest-path ./src-tauri/Cargo.toml --lib
-cargo check --manifest-path ./src-tauri/Cargo.toml
+cargo test --manifest-path ./src-tauri/Cargo.toml --lib --bins --tests
+cargo check --manifest-path ./src-tauri/Cargo.toml --all-targets
+cargo clippy --manifest-path ./src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
 For a real Windows installer, build on Windows with the MSVC Rust toolchain:
@@ -28,6 +32,10 @@ For a real Windows installer, build on Windows with the MSVC Rust toolchain:
 ```powershell
 npm run tauri build
 ```
+
+Frontend workflow tests drive the application through DOM events and mocked IPC. Rust tests include real subprocess fixtures for cancellation, timeouts, and output draining. Native Windows UI behavior and real-site downloads still need to be checked on Windows.
+
+`src/main.ts` coordinates startup, parsing and request creation. `src/playlist-selection.ts` handles paged selection, `src/download-queue.ts` renders queue state, and `src/navigation.ts` owns page navigation. Rust `playlist.rs`, `downloads.rs`, and `queue.rs` own page extraction, individual download jobs, and scheduling respectively. Queue tests cover independent cancellation, concurrency limits, failure/retry behavior, waiting cancellation, and output-name serialization. Toolchain settings live in `src/toolchain-settings.ts`, localized strings in `src/translations.ts`, and shared application-state types in `src/app-state.ts`.
 
 ## Tool Binaries
 
