@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "revision": "20260824.1",
-  "retrievedAtUtc": "2026-08-24T04:08:05.510Z",
+  "revision": "20260921.1",
+  "retrievedAtUtc": "2026-09-21T09:01:51.866Z",
   "targets": [
     {
       "target": "win-x64",
@@ -20,11 +20,11 @@
         {
           "name": "ffmpeg",
           "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260810.1/ffmpeg-windows-autobuild-2026-07-31-16-16-ffmpeg-N-125875-g5d4d3bdc61-win64-gpl-47f131b7a83c9ddc.zip",
-          "sourceSize": 169718040,
-          "sourceSha256": "47f131b7a83c9ddc5f25d50e890f2a40201a5402b8fdb8cb31f5dd6bd8e51e45",
-          "version": "autobuild-2026-07-31-16-16",
-          "sha256": "851aa8ea5366b5af33c0681cc292d662829c7088e9ac96f6e9b37030e6835ba4",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260921.1/ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
+          "sourceSize": 170731952,
+          "sourceSha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
+          "version": "autobuild-2026-08-31-20-15",
+          "sha256": "b9989f24e63be74e72aa45fec10a114ce660b562e4303d5f296f4fc8ba7cc896",
           "kind": "zip",
           "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
           "archivePathSuffix": "bin/ffmpeg.exe"
@@ -32,11 +32,11 @@
         {
           "name": "ffprobe",
           "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260810.1/ffmpeg-windows-autobuild-2026-07-31-16-16-ffmpeg-N-125875-g5d4d3bdc61-win64-gpl-47f131b7a83c9ddc.zip",
-          "sourceSize": 169718040,
-          "sourceSha256": "47f131b7a83c9ddc5f25d50e890f2a40201a5402b8fdb8cb31f5dd6bd8e51e45",
-          "version": "autobuild-2026-07-31-16-16",
-          "sha256": "01dd9a776db5df93d0e3a9b8714a7a7500402e8e628cdc68608ed781454f8b71",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260921.1/ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
+          "sourceSize": 170731952,
+          "sourceSha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
+          "version": "autobuild-2026-08-31-20-15",
+          "sha256": "73842bee6f270e85b2ab6fc3cfa715f614f16ad16700f5de6a9c1a2865cacf00",
           "kind": "zip",
           "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
           "archivePathSuffix": "bin/ffprobe.exe"
@@ -44,11 +44,11 @@
         {
           "name": "deno",
           "path": "Tools/win-x64/deno/deno.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260810.1/deno-v2.9.5-deno-x86_64-pc-windows-msvc-171efab55ac6b988.zip",
-          "sourceSize": 42691248,
-          "sourceSha256": "171efab55ac6b9881fd53ee4c20f8bf3bb1340ffc618483746909014db12216a",
-          "version": "2.9.5",
-          "sha256": "98f8c2a2d470e4ccb04c935c86ff8050817d877762aec5eaeeb9e409ccb3b9fd",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260921.1/deno-v2.9.7-deno-x86_64-pc-windows-msvc-a0c3101b4158d1df.zip",
+          "sourceSize": 42630221,
+          "sourceSha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
+          "version": "2.9.7",
+          "sha256": "e020f3e232bd16e33768dee528e5983349c962952051ced0a5d58ad42f5d9b33",
           "kind": "zip",
           "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
           "archivePathSuffix": "deno.exe"
