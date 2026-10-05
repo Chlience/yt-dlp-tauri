@@ -1,7 +1,7 @@
 {
   "schemaVersion": 4,
-  "revision": "20260921.1",
-  "retrievedAtUtc": "2026-09-21T09:01:51.866Z",
+  "revision": "20261005.1",
+  "retrievedAtUtc": "2026-10-05T10:33:08.193Z",
   "targets": [
     {
       "target": "win-x64",
@@ -20,11 +20,11 @@
         {
           "name": "ffmpeg",
           "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260921.1/ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
-          "sourceSize": 170731952,
-          "sourceSha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
-          "version": "autobuild-2026-08-31-20-15",
-          "sha256": "b9989f24e63be74e72aa45fec10a114ce660b562e4303d5f296f4fc8ba7cc896",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20261005.1/ffmpeg-windows-autobuild-2026-09-30-18-57-ffmpeg-N-127043-g5a54fcf75e-win64-gpl-06ecded6224d19eb.zip",
+          "sourceSize": 198634856,
+          "sourceSha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
+          "version": "autobuild-2026-09-30-18-57",
+          "sha256": "71d651517b3f34e4290042370277895a1570cfda43d22267ef191edfff20f65e",
           "kind": "zip",
           "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
           "archivePathSuffix": "bin/ffmpeg.exe"
@@ -32,11 +32,11 @@
         {
           "name": "ffprobe",
           "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
-          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20260921.1/ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
-          "sourceSize": 170731952,
-          "sourceSha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
-          "version": "autobuild-2026-08-31-20-15",
-          "sha256": "73842bee6f270e85b2ab6fc3cfa715f614f16ad16700f5de6a9c1a2865cacf00",
+          "sourceUrl": "https://github.com/Chlience/yt-dlp-tauri-toolchain/releases/download/toolchain-20261005.1/ffmpeg-windows-autobuild-2026-09-30-18-57-ffmpeg-N-127043-g5a54fcf75e-win64-gpl-06ecded6224d19eb.zip",
+          "sourceSize": 198634856,
+          "sourceSha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
+          "version": "autobuild-2026-09-30-18-57",
+          "sha256": "d266782173143c40e6bf08bbe3e44c0da36418baffccb5c14ec85ecf19d1561a",
           "kind": "zip",
           "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
           "archivePathSuffix": "bin/ffprobe.exe"
