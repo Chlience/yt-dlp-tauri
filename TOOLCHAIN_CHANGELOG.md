@@ -2,6 +2,10 @@
 
 Tool updates are published independently from application releases
 
+## 20261005.1 - 2026-10-05
+
+- `ffmpeg-windows`: `autobuild-2026-08-31-20-15` -> `autobuild-2026-09-30-18-57`
+
 ## 20260921.1 - 2026-09-21
 
 - `deno`: `v2.9.5` -> `v2.9.7`

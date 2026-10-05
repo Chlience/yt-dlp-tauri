@@ -49,58 +49,58 @@
       "adapter": "github-release",
       "selection": "previous-complete-month",
       "repository": "yt-dlp/FFmpeg-Builds",
-      "version": "autobuild-2026-08-31-20-15",
+      "version": "autobuild-2026-09-30-18-57",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 380024898,
-          "releaseTag": "autobuild-2026-08-31-20-15",
-          "releasePublishedAtUtc": "2026-08-31T20:15:18Z",
-          "releaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-08-31-20-15",
-          "assetId": 538479768,
-          "assetName": "ffmpeg-N-126374-g089a48eb36-win64-gpl.zip",
-          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-08-31-20-15/ffmpeg-N-126374-g089a48eb36-win64-gpl.zip",
+          "releaseId": 400347995,
+          "releaseTag": "autobuild-2026-09-30-18-57",
+          "releasePublishedAtUtc": "2026-09-30T18:58:03Z",
+          "releaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-18-57",
+          "assetId": 601595808,
+          "assetName": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl.zip",
+          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-30-18-57/ffmpeg-N-127043-g5a54fcf75e-win64-gpl.zip",
           "kind": "zip",
-          "size": 170731952,
-          "sha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
+          "size": 198634856,
+          "sha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
           "members": [
             {
               "tool": "ffmpeg",
               "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
-              "size": 145858048,
-              "sha256": "b9989f24e63be74e72aa45fec10a114ce660b562e4303d5f296f4fc8ba7cc896",
+              "size": 168274944,
+              "sha256": "71d651517b3f34e4290042370277895a1570cfda43d22267ef191edfff20f65e",
               "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
               "archivePathSuffix": "bin/ffmpeg.exe",
-              "archivePath": "ffmpeg-N-126374-g089a48eb36-win64-gpl/bin/ffmpeg.exe"
+              "archivePath": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl/bin/ffmpeg.exe"
             },
             {
               "tool": "ffprobe",
               "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
-              "size": 145645568,
-              "sha256": "73842bee6f270e85b2ab6fc3cfa715f614f16ad16700f5de6a9c1a2865cacf00",
+              "size": 168064512,
+              "sha256": "d266782173143c40e6bf08bbe3e44c0da36418baffccb5c14ec85ecf19d1561a",
               "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
               "archivePathSuffix": "bin/ffprobe.exe",
-              "archivePath": "ffmpeg-N-126374-g089a48eb36-win64-gpl/bin/ffprobe.exe"
+              "archivePath": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl/bin/ffprobe.exe"
             }
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260921.1",
-            "assetName": "ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
-            "size": 170731952,
-            "sha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229"
+            "releaseTag": "toolchain-20261005.1",
+            "assetName": "ffmpeg-windows-autobuild-2026-09-30-18-57-ffmpeg-N-127043-g5a54fcf75e-win64-gpl-06ecded6224d19eb.zip",
+            "size": 198634856,
+            "sha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7"
           }
         }
       ],
       "redistribution": {
         "archiveEligible": true,
         "provenance": {
-          "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-08-31-20-15",
-          "binarySha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
-          "ffmpegSourceRevision": "089a48eb36b2c0d185867522a1fc2613b5bbb96f",
-          "buildRepositoryRevision": "ea2ec3c0e0dfb11069729b7df5cb234bb2145956",
-          "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-08-31-20-15/checksums.sha256",
-          "checksumSha256": "14d96545662d90a73eecff7397df461139c5de8fcb083a993b55b139b8bd0e48",
+          "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-18-57",
+          "binarySha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
+          "ffmpegSourceRevision": "5a54fcf75e0245111075b1c31593ba1919c25306",
+          "buildRepositoryRevision": "dba7178e35dee861772988ac768d70fa4a80f948",
+          "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-30-18-57/checksums.sha256",
+          "checksumSha256": "afd96120c4c3a26fdcbac7ac9353a88122296868885d722082393dd58a2a61a8",
           "licenseFiles": [
             "LICENSE",
             "THIRD-PARTY-NOTICES.md"
@@ -147,6 +147,6 @@
       ]
     }
   ],
-  "revision": "20260921.1",
-  "generatedAtUtc": "2026-09-21T09:01:51.866Z"
+  "revision": "20261005.1",
+  "generatedAtUtc": "2026-10-05T10:33:08.193Z"
 }
