@@ -9,26 +9,26 @@
       "adapter": "github-release",
       "selection": "latest-stable",
       "repository": "denoland/deno",
-      "version": "v2.9.7",
+      "version": "v2.9.8",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 390117055,
-          "releaseTag": "v2.9.7",
-          "releasePublishedAtUtc": "2026-09-17T09:04:55Z",
-          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.7",
-          "assetId": 568431369,
+          "releaseId": 419563720,
+          "releaseTag": "v2.9.8",
+          "releasePublishedAtUtc": "2026-10-21T15:28:53Z",
+          "releaseUrl": "https://github.com/denoland/deno/releases/tag/v2.9.8",
+          "assetId": 662526167,
           "assetName": "deno-x86_64-pc-windows-msvc.zip",
-          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.7/deno-x86_64-pc-windows-msvc.zip",
+          "sourceUrl": "https://github.com/denoland/deno/releases/download/v2.9.8/deno-x86_64-pc-windows-msvc.zip",
           "kind": "zip",
-          "size": 42630221,
-          "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238",
+          "size": 42917472,
+          "sha256": "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf",
           "members": [
             {
               "tool": "deno",
               "path": "Tools/win-x64/deno/deno.exe",
-              "size": 97462048,
-              "sha256": "e020f3e232bd16e33768dee528e5983349c962952051ced0a5d58ad42f5d9b33",
+              "size": 98081568,
+              "sha256": "924397800533d3eb0ed0c889b20ad70e18b970d93acd8135bc043f425e528266",
               "licenseNotes": "Deno is distributed under the MIT license and provides the JavaScript runtime for yt-dlp EJS support.",
               "archivePathSuffix": "deno.exe",
               "archivePath": "deno.exe"
@@ -36,10 +36,10 @@
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260921.1",
-            "assetName": "deno-v2.9.7-deno-x86_64-pc-windows-msvc-a0c3101b4158d1df.zip",
-            "size": 42630221,
-            "sha256": "a0c3101b4158d1dfb7d6a78a7bf0f3de80c96bb423c152beec8beb22786f2238"
+            "releaseTag": "toolchain-20261026.1",
+            "assetName": "deno-v2.9.8-deno-x86_64-pc-windows-msvc-cba84b26e0df5ae7.zip",
+            "size": 42917472,
+            "sha256": "cba84b26e0df5ae7f74fc66b86a95b866872a86292ebd84fa1e959927edd93bf"
           }
         }
       ]
@@ -49,58 +49,58 @@
       "adapter": "github-release",
       "selection": "previous-complete-month",
       "repository": "yt-dlp/FFmpeg-Builds",
-      "version": "autobuild-2026-08-31-20-15",
+      "version": "autobuild-2026-09-30-18-57",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 380024898,
-          "releaseTag": "autobuild-2026-08-31-20-15",
-          "releasePublishedAtUtc": "2026-08-31T20:15:18Z",
-          "releaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-08-31-20-15",
-          "assetId": 538479768,
-          "assetName": "ffmpeg-N-126374-g089a48eb36-win64-gpl.zip",
-          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-08-31-20-15/ffmpeg-N-126374-g089a48eb36-win64-gpl.zip",
+          "releaseId": 400347995,
+          "releaseTag": "autobuild-2026-09-30-18-57",
+          "releasePublishedAtUtc": "2026-09-30T18:58:03Z",
+          "releaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-18-57",
+          "assetId": 601595808,
+          "assetName": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl.zip",
+          "sourceUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-30-18-57/ffmpeg-N-127043-g5a54fcf75e-win64-gpl.zip",
           "kind": "zip",
-          "size": 170731952,
-          "sha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
+          "size": 198634856,
+          "sha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
           "members": [
             {
               "tool": "ffmpeg",
               "path": "Tools/win-x64/ffmpeg/bin/ffmpeg.exe",
-              "size": 145858048,
-              "sha256": "b9989f24e63be74e72aa45fec10a114ce660b562e4303d5f296f4fc8ba7cc896",
+              "size": 168274944,
+              "sha256": "71d651517b3f34e4290042370277895a1570cfda43d22267ef191edfff20f65e",
               "licenseNotes": "GPL build recommended by yt-dlp; redistribution requires the applicable GPL notices and corresponding-source availability.",
               "archivePathSuffix": "bin/ffmpeg.exe",
-              "archivePath": "ffmpeg-N-126374-g089a48eb36-win64-gpl/bin/ffmpeg.exe"
+              "archivePath": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl/bin/ffmpeg.exe"
             },
             {
               "tool": "ffprobe",
               "path": "Tools/win-x64/ffmpeg/bin/ffprobe.exe",
-              "size": 145645568,
-              "sha256": "73842bee6f270e85b2ab6fc3cfa715f614f16ad16700f5de6a9c1a2865cacf00",
+              "size": 168064512,
+              "sha256": "d266782173143c40e6bf08bbe3e44c0da36418baffccb5c14ec85ecf19d1561a",
               "licenseNotes": "Distributed from the same GPL FFmpeg build as ffmpeg.exe.",
               "archivePathSuffix": "bin/ffprobe.exe",
-              "archivePath": "ffmpeg-N-126374-g089a48eb36-win64-gpl/bin/ffprobe.exe"
+              "archivePath": "ffmpeg-N-127043-g5a54fcf75e-win64-gpl/bin/ffprobe.exe"
             }
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260921.1",
-            "assetName": "ffmpeg-windows-autobuild-2026-08-31-20-15-ffmpeg-N-126374-g089a48eb36-win64-gpl-fc496061ed2cc526.zip",
-            "size": 170731952,
-            "sha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229"
+            "releaseTag": "toolchain-20261026.1",
+            "assetName": "ffmpeg-windows-autobuild-2026-09-30-18-57-ffmpeg-N-127043-g5a54fcf75e-win64-gpl-06ecded6224d19eb.zip",
+            "size": 198634856,
+            "sha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7"
           }
         }
       ],
       "redistribution": {
         "archiveEligible": true,
         "provenance": {
-          "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-08-31-20-15",
-          "binarySha256": "fc496061ed2cc5264d7c9c4ec929365f15267aeb40c94fd34ce637a0ea6ce229",
-          "ffmpegSourceRevision": "089a48eb36b2c0d185867522a1fc2613b5bbb96f",
-          "buildRepositoryRevision": "ea2ec3c0e0dfb11069729b7df5cb234bb2145956",
-          "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-08-31-20-15/checksums.sha256",
-          "checksumSha256": "14d96545662d90a73eecff7397df461139c5de8fcb083a993b55b139b8bd0e48",
+          "binaryReleaseUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/tag/autobuild-2026-09-30-18-57",
+          "binarySha256": "06ecded6224d19eba0c8597971c57ebf8e7614141b5f1adcb3b250dd0ff343c7",
+          "ffmpegSourceRevision": "5a54fcf75e0245111075b1c31593ba1919c25306",
+          "buildRepositoryRevision": "dba7178e35dee861772988ac768d70fa4a80f948",
+          "checksumUrl": "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/autobuild-2026-09-30-18-57/checksums.sha256",
+          "checksumSha256": "afd96120c4c3a26fdcbac7ac9353a88122296868885d722082393dd58a2a61a8",
           "licenseFiles": [
             "LICENSE",
             "THIRD-PARTY-NOTICES.md"
@@ -113,40 +113,40 @@
       "adapter": "github-release",
       "selection": "latest-stable",
       "repository": "yt-dlp/yt-dlp",
-      "version": "2026.08.19",
+      "version": "2026.10.21",
       "assets": [
         {
           "target": "win-x64",
-          "releaseId": 373411891,
-          "releaseTag": "2026.08.19",
-          "releasePublishedAtUtc": "2026-08-19T23:48:43Z",
-          "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.08.19",
-          "assetId": 521488854,
+          "releaseId": 420093571,
+          "releaseTag": "2026.10.21",
+          "releasePublishedAtUtc": "2026-10-21T21:54:37Z",
+          "releaseUrl": "https://github.com/yt-dlp/yt-dlp/releases/tag/2026.10.21",
+          "assetId": 663896069,
           "assetName": "yt-dlp.exe",
-          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp.exe",
+          "sourceUrl": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.10.21/yt-dlp.exe",
           "kind": "file",
-          "size": 17840399,
-          "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
+          "size": 17880111,
+          "sha256": "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555",
           "members": [
             {
               "tool": "yt-dlp",
               "path": "Tools/win-x64/yt-dlp/yt-dlp.exe",
-              "size": 17840399,
-              "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a",
+              "size": 17880111,
+              "sha256": "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555",
               "licenseNotes": "Official Windows standalone executable; the combined PyInstaller work is GPLv3+."
             }
           ],
           "archive": {
             "repository": "Chlience/yt-dlp-tauri-toolchain",
-            "releaseTag": "toolchain-20260824.1",
-            "assetName": "yt-dlp-2026.08.19-yt-dlp-66674953fe251b89.exe",
-            "size": 17840399,
-            "sha256": "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a"
+            "releaseTag": "toolchain-20261026.1",
+            "assetName": "yt-dlp-2026.10.21-yt-dlp-33121d192d706e62.exe",
+            "size": 17880111,
+            "sha256": "33121d192d706e62f684a06f80918e3f3a8ba52ac3a65213b6951c39c7d9f555"
           }
         }
       ]
     }
   ],
-  "revision": "20260921.1",
-  "generatedAtUtc": "2026-09-21T09:01:51.866Z"
+  "revision": "20261026.1",
+  "generatedAtUtc": "2026-10-26T09:01:55.298Z"
 }
