@@ -2,6 +2,12 @@
 
 Tool updates are published independently from application releases
 
+## 20261109.1 - 2026-11-09
+
+- `deno`: `v2.9.7` -> `v2.9.8`
+- `ffmpeg-windows`: `autobuild-2026-08-31-20-15` -> `autobuild-2026-10-31-18-18`
+- `yt-dlp`: `2026.08.19` -> `2026.10.26`
+
 ## 20260921.1 - 2026-09-21
 
 - `deno`: `v2.9.5` -> `v2.9.7`
